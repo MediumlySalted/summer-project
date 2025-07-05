@@ -168,12 +168,12 @@ class DACMACS:
         pk = {'e_g_alpha': pair(g, g) ** alpha,
               'g_inv_beta': g ** (1 / beta),
               'g_gamma_beta': g ** (gamma / beta)}
-        
+
         # Secret authority key
         sk = {'alpha': alpha,
               'beta': beta,
               'gamma': gamma}
-        
+
         # Attribute public keys
         public_attr_keys = {}
         for attribute in self.authorities[aid]["attributes"]:
@@ -195,7 +195,7 @@ class DACMACS:
 
 
     # ====== Secret Key Generation ====== #
-    def secret_key_gen(self, secret_authority_key, SP, public_attribute_keys,
+    def secret_key_gen(self, SP, auth_sk, public_attribute_keys,
                        attributes, user_certificate):
         """SKeyGen
 
@@ -207,7 +207,7 @@ class DACMACS:
         key for the user.
 
         Parameters: 
-            secret_authority_key - secret authority key
+            auth_sk - secret authority key
             SP - system parameter
             public_attribute_keys - set of public attr keys
             attributes - set of attr describing the secret key
@@ -216,7 +216,31 @@ class DACMACS:
         Returns: 
             sk (uid) - secret key for the user
         """
-        pass
+        g_a = SP['g_a']
+        t = self.group.random(ZR)
+
+        # AA Variables
+        alpha_k = auth_sk['alpha']
+        beta_k = auth_sk['beta']
+        gamma_k = auth_sk['gamma']
+
+        # User Variables
+        g_inv_z = user_certificate['message']['g_inv_z']
+        u = user_certificate['message']['u']
+        
+        user_sk = {
+            'K' : (g_inv_z ** alpha_k) * (g_a ** u) * (g_a ** (t / beta_k)),
+            'L': g_inv_z ** (beta_k * t),
+            'R': g_a ** t,
+            'AK': {}
+        }
+        for attr in attributes:
+            PAK = public_attribute_keys[attr]['public_attr_key']
+            AK = (g_inv_z ** (beta_k * gamma_k * t)) * \
+                (PAK ** (beta_k * u))
+            user_sk['AK'][attr] = AK
+
+        return user_sk
 
 
     # ========= Data Encryption ========= #
