@@ -264,16 +264,15 @@ class DACMACS:
         Returns:
             CT - ciphertext
         """
-        group = self.group
-        util = SecretUtil(group, verbose=False)
+        util = SecretUtil(self.group, verbose=False)
         g = SP['g']
         g_a = SP['g_a']
-        s = group.random(ZR)
+        s = self.group.random(ZR)
 
         # C, C', and C'' (C0, C1, and C2)
         C1 = g ** s
         C2 = {}
-        C0_product = group.init(GT, 1)
+        C0_product = self.group.init(GT, 1)
         for aid, pk in public_keys.items():
             C0_product *= pk['e_gg_alpha']
             C2[aid] = pk['g_inv_beta'] ** s
@@ -290,7 +289,7 @@ class DACMACS:
 
             PAK = public_attribute_keys[attr]['public_attr_key']
             pk = public_keys[aid]
-            r = group.random(ZR)
+            r = self.group.random(ZR)
 
             C[attr] = (g_a ** lambda_i) * (PAK ** -r)
             D1[attr] = pk['g_inv_beta'] ** r
@@ -451,17 +450,26 @@ def test_demo(debug=False):
     # ========== Global Setup =========== #
     SP, MSK, (sk_CA, vk_CA) = dacmacs.setup()
 
-    # ======= Register Authority ======== #
+    # ===== Register Users and AAs ====== #
+    user_info = {'name': 'Alice', 'dob': '01-01-2000'}
+    uid, (GPK, GSK), cert = dacmacs.user_registration(SP, sk_CA, user_info)
+
     aid1 = dacmacs.attr_auth_registration("GOV")
     aid2 = dacmacs.attr_auth_registration("UT")
 
+    # ============ AA Setup ============= #
     dacmacs.authorities[aid1]['attributes'] = [f'TOPSECRET@{aid1.upper()}']
     dacmacs.authorities[aid2]['attributes'] = [f'EMPLOYEE@{aid2.upper()}']
 
     sk1, pk1, attr_keys1 = dacmacs.attr_auth_setup(SP, aid1)
     sk2, pk2, attr_keys2 = dacmacs.attr_auth_setup(SP, aid2)
 
+    secret_keys = {}
+    secret_keys[aid1] = dacmacs.secret_key_gen(SP, sk1, attr_keys1, [f'TOPSECRET@{aid1.upper()}'], cert)
+    secret_keys[aid2] = dacmacs.secret_key_gen(SP, sk2, attr_keys2, [f'EMPLOYEE@{aid2.upper()}'], cert)
+
     if debug:
+        # ======== Attribute Authority Info ======== #
         print(f"\n\n{"=" * 25} Attribute Authorities {"=" * 25}")
         for aid, aa in dacmacs.authorities.items():
             print(f"\nAuthority ID: {aid}")
@@ -482,15 +490,7 @@ def test_demo(debug=False):
                 for k, v in keys.items():
                     print(f"      {k}: {v}")
 
-    # ========== Register User ========== #
-    user_info = {'name': 'Alice', 'dob': '01-01-2000'}
-    uid, (GPK, GSK), cert = dacmacs.user_registration(SP, sk_CA, user_info)
-
-    secret_keys = {}
-    secret_keys[aid1] = dacmacs.secret_key_gen(SP, sk1, attr_keys1,[f'TOPSECRET@{aid1.upper()}'], cert)
-    secret_keys[aid2] = dacmacs.secret_key_gen(SP, sk2, attr_keys2, [f'EMPLOYEE@{aid2.upper()}'], cert)
-
-    if debug:
+        # =============== User Info ================ #
         print(f"\n\n{"=" * 25} Users {"=" * 25}")
         for uid, user in dacmacs.users.items():
             print(f"\nUser ID: {uid}")
@@ -507,14 +507,14 @@ def test_demo(debug=False):
                     print(f"      {k}: {v}")
 
     # ============= Encrypt ============= #
-    message = group.random(GT)
+    data = group.random(GT)
     policy = f'TOPSECRET@{aid1.upper()} and EMPLOYEE@{aid2.upper()}'
 
     public_keys = { aid1: pk1, aid2: pk2 }
     public_attr_keys = { **attr_keys1, **attr_keys2 }
 
     ciphertext = dacmacs.encrypt(SP, public_keys, public_attr_keys,
-                                 message, policy)
+                                 data, policy)
 
     if debug:
         print(f"\n\n{"=" * 25} Encryption {"=" * 25}")
@@ -546,8 +546,8 @@ def test_demo(debug=False):
             print(f"    {attr}: {D2}")
 
     # ====== Attribute Revocation ======= #
-    # Comment out secret_key_update to test for decryption failure
-    # Leaving it in should lead to successful decryption
+    #   Comment out secret_key_update to test for decryption failure
+    #   Leaving it in should lead to successful decryption
     KUK, CUK = dacmacs.update_key_gen(SP, sk1, cert, attr_keys1[f'TOPSECRET@{aid1.upper()}']['version_key'])
     secret_keys[aid1] = dacmacs.secret_key_update(secret_keys[aid1], KUK, f'TOPSECRET@{aid1.upper()}')
     ciphertext = dacmacs.ciphertext_update(ciphertext, CUK, f'TOPSECRET@{aid1.upper()}')
@@ -563,7 +563,7 @@ def test_demo(debug=False):
         print()
 
     print(f'\n\n{'-' * 50}')
-    if content_key == message: print("\nSuccessfully Decrypted!\n")
+    if content_key == data: print("\nSuccessfully Decrypted!\n")
     else: print("\nDecryption Failed!\n")
     print(f'{'-' * 50}\n')
 
