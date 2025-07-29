@@ -17,10 +17,8 @@ from charm.toolbox.secretutil import SecretUtil
 import hashlib
 
 class DACMACS:
-    def __init__(self, group):
-        self.group = group
-        self.authorities = {}   # set of attribute authorities
-        self.users = {}         # set of users
+    def __init__(self):
+        self.group = PairingGroup('SS512')
 
     # ====== System Initialization ====== #
     def setup(self):
@@ -102,13 +100,6 @@ class DACMACS:
             'signature': signature
         }
 
-        # Store user data
-        self.users[uid] = {
-            'GPK': GPK,
-            'GSK': GSK,
-            'certificate': certificate
-        }
-
         return uid, (GPK, GSK), certificate
 
     def attr_auth_registration(self, aa_info):
@@ -128,18 +119,11 @@ class DACMACS:
         Returns:
             aid - global authority identity
         """
-        # Create & Store attribute authority id
+        # Create attribute authority id
         aid = hashlib.sha256(str(aa_info).encode()).hexdigest()
-        self.authorities[aid] = {
-            'info': aa_info,
-            'public_key': None,
-            'secret_key': None,
-            'attributes': {}
-        }
-
         return aid
 
-    def attr_auth_setup(self, SP, aid):
+    def attr_auth_setup(self, SP, aid, attributes):
         """AASetup - Setup to be run by each attribute authority
 
         The attribute authority setup algorithm takes the system
@@ -175,7 +159,7 @@ class DACMACS:
 
         # Attribute public keys
         public_attr_keys = {}
-        for attribute in self.authorities[aid]["attributes"]:
+        for attribute in attributes:
             vk = self.group.random(ZR)
             g_v = g ** vk
             public_attr_key = (g_v * H(attribute)) ** gamma
@@ -184,11 +168,6 @@ class DACMACS:
                 'version_key': vk,
                 'public_attr_key': public_attr_key
             }
-
-        # Store in authority registry
-        self.authorities[aid]['public_key'] = pk
-        self.authorities[aid]['secret_key'] = sk
-        self.authorities[aid]['public_attr_keys'] = public_attr_keys
 
         return sk, pk, public_attr_keys
 
@@ -444,74 +423,70 @@ class DACMACS:
         return CT
 
 def test_demo(debug=False):
-    group = PairingGroup('SS512')
-    dacmacs = DACMACS(group)
+    dacmacs = DACMACS()
 
     # ========== Global Setup =========== #
     SP, MSK, (sk_CA, vk_CA) = dacmacs.setup()
 
     # ===== Register Users and AAs ====== #
-    user_info = {'name': 'Alice', 'dob': '01-01-2000'}
+    user_info = { 'name': 'Alice', 'dob': '01-01-2000' }
     uid, (GPK, GSK), cert = dacmacs.user_registration(SP, sk_CA, user_info)
 
     aid1 = dacmacs.attr_auth_registration("GOV")
     aid2 = dacmacs.attr_auth_registration("UT")
 
     # ============ AA Setup ============= #
-    dacmacs.authorities[aid1]['attributes'] = [f'TOPSECRET@{aid1.upper()}']
-    dacmacs.authorities[aid2]['attributes'] = [f'EMPLOYEE@{aid2.upper()}']
+    sk1, pk1, attr_keys1 = dacmacs.attr_auth_setup(SP, aid1, [f'TOPSECRET@{aid1.upper()}'])
+    sk2, pk2, attr_keys2 = dacmacs.attr_auth_setup(SP, aid2, [f'EMPLOYEE@{aid2.upper()}'])
 
-    sk1, pk1, attr_keys1 = dacmacs.attr_auth_setup(SP, aid1)
-    sk2, pk2, attr_keys2 = dacmacs.attr_auth_setup(SP, aid2)
+    public_keys = { aid1: pk1, aid2: pk2 }
+    public_attr_keys = { **attr_keys1, **attr_keys2 }
 
     secret_keys = {}
     secret_keys[aid1] = dacmacs.secret_key_gen(SP, sk1, attr_keys1, [f'TOPSECRET@{aid1.upper()}'], cert)
     secret_keys[aid2] = dacmacs.secret_key_gen(SP, sk2, attr_keys2, [f'EMPLOYEE@{aid2.upper()}'], cert)
 
-    if debug:
-        # ======== Attribute Authority Info ======== #
-        print(f"\n\n{"=" * 25} Attribute Authorities {"=" * 25}")
-        for aid, aa in dacmacs.authorities.items():
-            print(f"\nAuthority ID: {aid}")
-            print(f"  Info: {aa['info']}")
+    # if debug:
+    #     # ======== Attribute Authority Info ======== #
+    #     print(f"\n\n{"=" * 25} Attribute Authorities {"=" * 25}")
+    #     for aid, aa in dacmacs.authorities.items():
+    #         print(f"\nAuthority ID: {aid}")
+    #         print(f"  Info: {aa['info']}")
             
-            print("  Public Key:")
-            for k, v in aa['public_key'].items():
-                print(f"    {k}: {v}")
-            print("  Secret Key:")
-            for k, v in aa['secret_key'].items():
-                print(f"    {k}: {v}")
-            print("  Attributes:")
-            for attr in aa['attributes']:
-                print(f"    {attr}")
-            print("  Attribute Public Keys:")
-            for attr, keys in aa['public_attr_keys'].items():
-                print(f"    {attr}:")
-                for k, v in keys.items():
-                    print(f"      {k}: {v}")
+    #         print("  Public Key:")
+    #         for k, v in aa['public_key'].items():
+    #             print(f"    {k}: {v}")
+    #         print("  Secret Key:")
+    #         for k, v in aa['secret_key'].items():
+    #             print(f"    {k}: {v}")
+    #         print("  Attributes:")
+    #         for attr in aa['attributes']:
+    #             print(f"    {attr}")
+    #         print("  Attribute Public Keys:")
+    #         for attr, keys in aa['public_attr_keys'].items():
+    #             print(f"    {attr}:")
+    #             for k, v in keys.items():
+    #                 print(f"      {k}: {v}")
 
-        # =============== User Info ================ #
-        print(f"\n\n{"=" * 25} Users {"=" * 25}")
-        for uid, user in dacmacs.users.items():
-            print(f"\nUser ID: {uid}")
-            print(f"  GPK: {user['GPK']}")
-            print(f"  GSK: {user['GSK']}")
-            print(f"  Certificate:")
-            for k, v in user['certificate']['message'].items():
-                print(f"    {k}: {v}")
-            print(f"  Signature: {user['certificate']['signature']}")
-            print(f"  Secret Keys: ")
-            for aid, keys in secret_keys.items():
-                print(f"    {aid}: ")
-                for k, v in keys.items():
-                    print(f"      {k}: {v}")
+    #     # =============== User Info ================ #
+    #     print(f"\n\n{"=" * 25} Users {"=" * 25}")
+    #     for uid, user in dacmacs.users.items():
+    #         print(f"\nUser ID: {uid}")
+    #         print(f"  GPK: {user['GPK']}")
+    #         print(f"  GSK: {user['GSK']}")
+    #         print(f"  Certificate:")
+    #         for k, v in user['certificate']['message'].items():
+    #             print(f"    {k}: {v}")
+    #         print(f"  Signature: {user['certificate']['signature']}")
+    #         print(f"  Secret Keys: ")
+    #         for aid, keys in secret_keys.items():
+    #             print(f"    {aid}: ")
+    #             for k, v in keys.items():
+    #                 print(f"      {k}: {v}")
 
     # ============= Encrypt ============= #
-    data = group.random(GT)
+    data = dacmacs.group.random(GT)
     policy = f'TOPSECRET@{aid1.upper()} and EMPLOYEE@{aid2.upper()}'
-
-    public_keys = { aid1: pk1, aid2: pk2 }
-    public_attr_keys = { **attr_keys1, **attr_keys2 }
 
     ciphertext = dacmacs.encrypt(SP, public_keys, public_attr_keys,
                                  data, policy)

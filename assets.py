@@ -17,7 +17,7 @@ COLORS = {
     'btn_primary': Color(210, 50, 75),    # Main action button (blue)
     'btn_success': Color(120, 50, 70),    # Success/confirm (green)
     'btn_warning': Color(35, 90, 90),     # Warn (orange)
-    'btn_error': Color(0, 85, 80),        # Destructive (red)
+    'btn_error': Color(0, 75, 85),        # Destructive (red)
     'btn_neutral': Color(210, 5, 55),     # For subtle/inactive buttons
 
     'btn_ca': Color(275, 40, 85),         # Purple tag for Certificate Authority
