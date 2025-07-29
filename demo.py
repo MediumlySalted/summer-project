@@ -36,7 +36,7 @@ class AccessControlDemo(tk.Tk):
         main_frame = tk.Frame(self, width=1024, height=768, background='#808080')
         main_frame.place(x=0, y=0, width=1024, height=786) 
         self.pages = {}
-        for F in (CAMenu, AAMenu, UserMenu, Logs, RegisterUserForm, RegisterAAForm, LoginAAForm, LoginUserForm, AttributeListInput):
+        for F in (CAMenu, AAMenu, UserMenu, Logs, RegisterUserForm, RegisterAAForm, LoginAAForm, LoginUserForm, CreateAttributes):
             frame = F(main_frame, self)
             self.pages[F] = frame
             frame.place(x=0, y=0, width=1024, height=786)
@@ -51,29 +51,9 @@ class AccessControlDemo(tk.Tk):
         self.destroy()
 
 
-# ======= Menus ======= #
+# =========== CAMenus =========== #
 class CAMenu(tk.Frame):
-    """
-    Start/Main menu of the app.
-
-    As the certificate authority, initialize the system, register AAs, 
-    and users. AA setup is handled by the AA themselves. Here you can
-    also find the list of authorities and other global informaiton.
-
-    Attributes
-    ----------
-    controller : Tk
-        A Tk object controlling the main application
-    """
-
     def __init__(self, parent, controller):
-        """
-        Menu constructor.
-
-        Args:
-            parent (tk.Frame) - Parent frame containing Menu object
-            controller (tk.Tk) - Main app controller
-        """
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
 
@@ -84,6 +64,11 @@ class CAMenu(tk.Frame):
         self.create_elements()
 
     def create_elements(self):
+        self.create_title()
+        self.create_buttons()
+        self.create_infobox()
+
+    def create_title(self):
         subtitle = ColorLabel(
             self,
             text="Certificate Authority Menu",
@@ -92,24 +77,23 @@ class CAMenu(tk.Frame):
         )
         subtitle.pack(pady=20)
 
-        # Frame to group buttons
+    def create_buttons(self):
         btn_frame = tk.Frame(self, background=COLORS['background'])
         btn_frame.pack()
-
         # Register Buttons
         ColorButton(
             btn_frame,
             "Register User",
             color=COLORS['btn_primary'],
             width=20,
-            command=self.register_user
+            command=lambda: self.controller.show_page(RegisterUserForm)
         ).pack(pady=8)
         ColorButton(
             btn_frame,
             "Register AA",
             color=COLORS['btn_primary'],
             width=20,
-            command=self.register_authority
+            command=lambda: self.controller.show_page(RegisterAAForm)
         ).pack(pady=8)
         # Login Buttons
         ColorButton(
@@ -142,7 +126,7 @@ class CAMenu(tk.Frame):
             command=lambda: self.controller.show_page(Logs)
         ).pack(pady=8)
 
-        # Optional: system info area (can be toggled with button above)
+    def create_infobox(self):
         self.sysinfo_text = tk.Text(
             self,
             width=80,
@@ -153,12 +137,6 @@ class CAMenu(tk.Frame):
         self.sysinfo_text.pack(pady=20)
         self.sysinfo_text.insert("1.0", "System not initialized.\n")
         self.sysinfo_text.config(state="disabled")
-
-    def register_user(self):
-        self.controller.show_page(RegisterUserForm)
-
-    def register_authority(self):
-        self.controller.show_page(RegisterAAForm)
 
     def view_system_info(self):
         info = ""
@@ -188,178 +166,6 @@ class CAMenu(tk.Frame):
         self.sysinfo_text.config(state="disabled")
 
 
-class AAMenu(tk.Frame):
-    """
-    Menu for handling Attribute Authority tasks.
-
-    As an AA, create attributes and generate their version keys and
-    public attribute keys, generate AA secret and public keys,
-    authenticate users, and assign or revoke attributes.
-
-    Attributes
-    ----------
-    controller : Tk
-        A Tk object controlling the main application
-    """
-
-    def __init__(self, parent, controller):
-        """
-        Menu constructor.
-
-        Args:
-            parent (tk.Frame) - Parent frame containing Menu object
-            controller (tk.Tk) - Main app controller
-        """
-        tk.Frame.__init__(self, parent, background=COLORS['background'])
-        self.controller = controller
-        self.aid = None
-
-        self.create_elements()
-
-    def create_elements(self):
-        self.create_topbar()
-        self.create_menu()
-
-    def create_topbar(self):
-        self.navbar = TopNavBar(
-            self,
-            self.controller,
-            title=f"Logged in as {self.aid}",
-            back_command=lambda: self.controller.show_page(CAMenu),
-            quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='x', pady=(0, 20))
-
-    def create_menu(self):
-        btn_frame = tk.Frame(self, background=COLORS['background'])
-        btn_frame.pack()
-
-        ColorButton(
-            btn_frame,
-            "Create Attributes",
-            color=COLORS['btn_primary'],
-            width=20,
-            command=self.create_attributes
-        ).pack(pady=8)
-        ColorButton(
-            btn_frame,
-            "Assign Attributes",
-            color=COLORS['btn_primary'],
-            width=20,
-            command=self.assign_attributes
-        ).pack(pady=8)
-
-    def create_attributes(self):
-        self.controller.show_page(AttributeListInput)
-
-    def assign_attributes(self):
-        self.authenticate_user()
-        # assign attributes
-        # ...
-        # ...
-        self.generate_keys()
-
-    def authenticate_user(self):
-        pass
-
-    def generate_keys(self):
-        pass
-
-    def revoke_attribute(self):
-        # revoke attributes
-        # ...
-        # ...
-        self.generate_update_keys()
-        self.update_user_keys()
-        self.update_ciphertext()
-
-    def generate_update_keys(self):
-        pass
-
-    def update_user_keys(self):
-        pass
-
-    def update_ciphertext(self):
-        pass
-
-    def log_in(self):
-        self.aid = self.controller.current_user
-        name = self.controller.params['authorities'][self.aid]['info']['name']
-        self.navbar.title_label.configure(text=f"Logged in as {name}")
-
-
-class UserMenu(tk.Frame):
-    """
-    Menu for users to interact with the "cloud".
-
-    As a user, encrypt and upload a "file" with a custom access control
-    policy, or query a "file" and attempt to decrypt it.
-
-    Attributes
-    ----------
-    controller : Tk
-        A Tk object controlling the main application
-    """
-
-    def __init__(self, parent, controller):
-        """
-        Menu constructor.
-
-        Args:
-            parent (tk.Frame) - Parent frame containing Menu object
-            controller (tk.Tk) - Main app controller
-        """
-        tk.Frame.__init__(self, parent, background=COLORS['background'])
-        self.controller = controller
-        self.uid = None
-
-        self.create_elements()
-    
-    def create_elements(self):
-        self.create_topbar()
-        self.create_menu()
-
-    def create_topbar(self):
-        self.navbar = TopNavBar(
-            self,
-            self.controller,
-            title=f"Logged in as {self.uid}",
-            back_command=lambda: self.controller.show_page(CAMenu),
-            quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='x', pady=(0, 20))
-
-    def create_menu(self):
-        btn_frame = tk.Frame(self, background=COLORS['background'])
-        btn_frame.pack()
-
-        ColorButton(
-            btn_frame,
-            "Create File",
-            color=COLORS['btn_primary'],
-            width=20,
-            command=self.create_file
-        ).pack(pady=8)
-        ColorButton(
-            btn_frame,
-            "Search File",
-            color=COLORS['btn_primary'],
-            width=20,
-            command=self.search_file
-        ).pack(pady=8)
-
-    def create_file(self):
-        pass
-
-    def search_file(self):
-        pass
-
-    def log_in(self):
-        self.uid = self.controller.current_user
-        name = self.controller.params['users'][self.uid]['info']['name']
-        self.navbar.title_label.configure(text=f"Logged in as {name}")
-
-
 class BaseForm(tk.Frame):
     def __init__(self, parent, controller, title, back_command, submit_text, submit_command):
         super().__init__(parent, background=COLORS['background'])
@@ -378,7 +184,6 @@ class BaseForm(tk.Frame):
         self.form_frame = tk.Frame(self, background=COLORS['background'])
         self.form_frame.pack(pady=20)
 
-        # Submit button
         ColorButton(
             self,
             text=submit_text,
@@ -447,6 +252,7 @@ class RegisterAAForm(BaseForm):
             'public_attribute_keys': None,
         }
         self.clear_fields()
+        self.controller.show_page(CAMenu)
 
 
 class RegisterUserForm(BaseForm):
@@ -481,6 +287,7 @@ class RegisterUserForm(BaseForm):
             'certificate': cert
         }
         self.clear_fields()
+        self.controller.show_page(CAMenu)
 
 
 class LoginAAForm(BaseForm):
@@ -527,17 +334,50 @@ class LoginUserForm(BaseForm):
         self.controller.show_page(UserMenu)
 
 
-class Logs(tk.Frame):
+# =========== AAMenus =========== #
+class AAMenu(tk.Frame):
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
+        self.aid = None
+
         self.create_elements()
-    
+
     def create_elements(self):
-        pass
+        self.navbar = TopNavBar(
+            self,
+            self.controller,
+            title=f"Logged in as {self.aid}",
+            back_command=lambda: self.controller.show_page(CAMenu),
+            quit_command=lambda: self.controller.quit()
+        )
+        self.navbar.pack(fill='x', pady=(0, 20))
+
+        btn_frame = tk.Frame(self, background=COLORS['background'])
+        btn_frame.pack()
+
+        ColorButton(
+            btn_frame,
+            "Create Attributes",
+            color=COLORS['btn_primary'],
+            width=20,
+            command=lambda: self.controller.show_page(CreateAttributes)
+        ).pack(pady=8)
+        ColorButton(
+            btn_frame,
+            "Assign Attributes",
+            color=COLORS['btn_primary'],
+            width=20,
+            command=lambda: self.controller.show_page(AssignAttributes)
+        ).pack(pady=8)
+
+    def log_in(self):
+        self.aid = self.controller.current_user
+        name = self.controller.params['authorities'][self.aid]['info']['name']
+        self.navbar.title_label.configure(text=f"Logged in as {name}")
 
 
-class AttributeListInput(tk.Frame):
+class CreateAttributes(tk.Frame):
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
@@ -550,7 +390,7 @@ class AttributeListInput(tk.Frame):
             self,
             self.controller,
             title="Create New Attributes",
-            back_command=lambda: self.controller.show_page(CAMenu),
+            back_command=self.back,
             quit_command=lambda: self.controller.quit()
         )
         self.navbar.pack(fill='x', pady=(0, 20))
@@ -559,19 +399,15 @@ class AttributeListInput(tk.Frame):
         self.entries_frame.pack()
 
     def build_form(self):
-        authorities = self.controller.params['authorities']
-        authority = authorities[self.controller.current_user]
-        attributes = authority['attributes']
-        for attribute in attributes:
-            self.add_entry(attribute)
+        self.add_entry()
 
-        submit_btn = ColorButton(
+        self.submit_btn = ColorButton(
             self,
-            text="Create Attributes",
+            text="Update Attributes",
             color=COLORS['btn_success'],
             command=self.submit_attributes
         )
-        submit_btn.pack(pady=10)
+        self.submit_btn.pack(pady=10)
 
     def add_entry(self, attribute=None):
         if self.entries:
@@ -594,7 +430,7 @@ class AttributeListInput(tk.Frame):
         entry = ColorEntry(frame, width=30)
         entry.pack(side="left", padx=5)
         entry.focus_set()
-        entry.insert(0, attribute)
+        if attribute: entry.insert(0, attribute)
 
         self.add_btn = ColorButton(
             frame,
@@ -633,10 +469,178 @@ class AttributeListInput(tk.Frame):
         authority['secret_key'] = sk1
         authority['public_attribute_keys'] = attr_keys1
 
+        self.reset()
+        self.controller.show_page(AAMenu)
 
+    def back(self):
+        self.reset()
+        self.controller.show_page(AAMenu)
+
+    def reset(self):
+        self.entries = []
+        for child in self.entries_frame.winfo_children():
+            child.destroy()
+        self.submit_btn.destroy()
+        self.build_form()
+
+
+class AssignAttributes(tk.Frame):
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent, background=COLORS['background'])
+        self.controller = controller
+
+        self.create_elements()
+
+    def create_elements(self):
+        self.navbar = TopNavBar(
+            self,
+            self.controller,
+            title="Assign Attributes",
+            back_command=self.back,
+            quit_command=lambda: self.controller.quit()
+        )
+        self.navbar.pack(fill='x', pady=(0, 20))
+
+    def authenticate_user(self, user):
+        pass
+
+    def generate_keys(self):
+        pass
+
+
+class RevokeAttributes(tk.Frame):
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent, background=COLORS['background'])
+        self.controller = controller
+
+        self.create_elements()
+
+    def create_elements(self):
+        self.navbar = TopNavBar(
+            self,
+            self.controller,
+            title="Revoke Attributes",
+            back_command=self.back,
+            quit_command=lambda: self.controller.quit()
+        )
+        self.navbar.pack(fill='x', pady=(0, 20))
+
+    def generate_update_keys(self):
+        pass
+
+    def update_user_keys(self):
+        pass
+
+    def update_ciphertext(self):
+        pass
+
+
+# ========== User Menus ========== #
+class UserMenu(tk.Frame):
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent, background=COLORS['background'])
+        self.controller = controller
+        self.uid = None
+
+        self.create_elements()
+    
+    def create_elements(self):
+        self.navbar = TopNavBar(
+            self,
+            self.controller,
+            title=f"Logged in as {self.uid}",
+            back_command=lambda: self.controller.show_page(CAMenu),
+            quit_command=lambda: self.controller.quit()
+        )
+        self.navbar.pack(fill='x', pady=(0, 20))
+
+        btn_frame = tk.Frame(self, background=COLORS['background'])
+        btn_frame.pack()
+
+        ColorButton(
+            btn_frame,
+            "Create File",
+            color=COLORS['btn_primary'],
+            width=20,
+            command=lambda: self.controller.show_page(CreateFile)
+        ).pack(pady=8)
+        ColorButton(
+            btn_frame,
+            "Search File",
+            color=COLORS['btn_primary'],
+            width=20,
+            command=lambda: self.controller.show_page(SearchFile)
+        ).pack(pady=8)
+
+    def log_in(self):
+        self.uid = self.controller.current_user
+        name = self.controller.params['users'][self.uid]['info']['name']
+        self.navbar.title_label.configure(text=f"Logged in as {name}")
+
+
+class CreateFile(tk.Frame):
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent, background=COLORS['background'])
+        self.controller = controller
+
+        self.create_elements()
+
+    def create_elements(self):
+        self.navbar = TopNavBar(
+            self,
+            self.controller,
+            title="Create New Attributes",
+            back_command=self.back,
+            quit_command=lambda: self.controller.quit()
+        )
+        self.navbar.pack(fill='x', pady=(0, 20))
+
+
+class SearchFile(tk.Frame):
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent, background=COLORS['background'])
+        self.controller = controller
+
+        self.create_elements()
+
+    def create_elements(self):
+        self.navbar = TopNavBar(
+            self,
+            self.controller,
+            title="Create New Attributes",
+            back_command=self.back,
+            quit_command=lambda: self.controller.quit()
+        )
+        self.navbar.pack(fill='x', pady=(0, 20))
+
+
+# ========== Misc Menus ========== #
+class Logs(tk.Frame):
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent, background=COLORS['background'])
+        self.controller = controller
+        self.create_elements()
+    
+    def create_elements(self):
+        self.navbar = TopNavBar(
+            self,
+            self.controller,
+            title="Create New Attributes",
+            back_command=self.back,
+            quit_command=lambda: self.controller.quit()
+        )
+        self.navbar.pack(fill='x', pady=(0, 20))
+
+
+# ======= Widgets ======= #
 class TopNavBar(tk.Frame):
     def __init__(self, parent, controller, title, back_command=None, quit_command=None, height=50):
-        tk.Frame.__init__(self, parent, background=COLORS['background'].light(1.15), height=height)
+        tk.Frame.__init__(
+            self,
+            parent,
+            background=COLORS['background'].light(1.15),
+            height=height
+        )
         self.controller = controller
 
         self.color = COLORS['background'].light(1.15)
@@ -673,7 +677,6 @@ class TopNavBar(tk.Frame):
         self.title_label.pack(side="top", pady=15)
 
 
-# ======= Widgets ======= #
 class ColorButton(tk.Button):
     def __init__(self, parent, text, color=COLORS['btn_primary'], font=('', 12), width=16, height=2, **kwargs):
         self.btn_color = color
