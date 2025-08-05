@@ -861,6 +861,7 @@ class CreateFile(tk.Frame):
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
+        self.uid = None
 
         self.create_elements()
 
@@ -869,7 +870,7 @@ class CreateFile(tk.Frame):
             self,
             self.controller,
             title="Encrypt Text File",
-            back_command=self.back,
+            back_command=lambda: self.controller.show_page(UserMenu(self.uid)),
             quit_command=lambda: self.controller.quit()
         )
         self.navbar.pack(fill='x', pady=(0, 20))
@@ -879,6 +880,7 @@ class SearchFile(tk.Frame):
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
+        self.uid = None
 
         self.create_elements()
 
@@ -887,7 +889,7 @@ class SearchFile(tk.Frame):
             self,
             self.controller,
             title="Decrypt Text File",
-            back_command=self.back,
+            back_command=lambda: self.controller.show_page(UserMenu(self.uid)),
             quit_command=lambda: self.controller.quit()
         )
         self.navbar.pack(fill='x', pady=(0, 20))
