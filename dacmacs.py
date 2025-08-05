@@ -172,6 +172,15 @@ class DACMACS:
         return sk, pk, public_attr_keys
 
     # ====== Secret Key Generation ====== #
+    def verify_certificate(self, SP, certificate, verification_key):
+        H = SP['H']
+        msg = certificate['message']
+
+        message_str = msg['uid'] + str(msg['u']) + str(msg['g_inv_z'])
+        hashed = H(message_str)
+
+        return pair(certificate['signature'], SP['g']) == pair(hashed, verification_key)
+
     def secret_key_gen(self, SP, auth_sk, public_attribute_keys,
                        attributes, user_certificate):
         """SKeyGen
