@@ -45,7 +45,7 @@ class AccessControlDemo(tk.Tk):
             frame.place(x=0, y=0, width=1024, height=786)
 
         self.show_page(CAMenu)
-        # self.setup_test()
+        self.setup_test()
 
     def show_page(self, page_class, *args, **kwargs):
         page = self.pages[page_class]
@@ -121,7 +121,7 @@ class AccessControlDemo(tk.Tk):
             'secret_key': None,
             'public_attribute_keys': None,
         }
-        self.params['secret_keys'][aid1] = {}
+        self.params['secret_keys'][aid2] = {}
 
         # Add Attributes
         self.params['authorities'][aid1]['attributes'] = [
@@ -133,6 +133,26 @@ class AccessControlDemo(tk.Tk):
             f'ATTRIBUTE3@{aid2.upper()}',
             f'ATTRIBUTE4@{aid2.upper()}',
         ]
+
+        # Assign Attributes
+        attr_aid1 = [f'ATTRIBUTE1@{aid1.upper()}', f'ATTRIBUTE2@{aid1.upper()}']
+        attr_aid2 = [f'ATTRIBUTE3@{aid2.upper()}']
+
+        sk1, pk1, attr_keys1 = self.dacmacs.attr_auth_setup(SP, aid1, attr_aid1)
+        self.params['public_keys'][aid1] = pk1
+        self.params['public_attr_keys'].update(attr_keys1)
+        self.params['secret_keys'][aid1][uid1] = self.dacmacs.secret_key_gen(
+            SP, sk1, attr_keys1, 
+            attr_aid1, cert1
+        )
+
+        sk2, pk2, attr_keys2 = self.dacmacs.attr_auth_setup(SP, aid2, attr_aid2)
+        self.params['public_keys'][aid2] = pk2
+        self.params['public_attr_keys'].update(attr_keys2)
+        self.params['secret_keys'][aid2][uid1] = self.dacmacs.secret_key_gen(
+            SP, sk2, attr_keys2,
+            attr_aid2, cert1
+        )
 
 
 # =========== CAMenus =========== #
@@ -245,9 +265,10 @@ class CAMenu(tk.Frame):
             info += f"   Password: {user['info']['password']}\n"
             info += f"   Attributes:\n"
             for aid in self.controller.params['secret_keys']:
+                auth = self.controller.params['authorities'][aid]['info']['name']
                 try:
                     for attr in self.controller.params['secret_keys'][aid][uid]['AK'].keys():
-                        info += f"    -{attr.split("@")[0]}\n"
+                        info += f"    -{attr.split("@")[0]} ({auth})\n"
                 except: pass
 
         self.sysinfo_text.config(state="normal")
