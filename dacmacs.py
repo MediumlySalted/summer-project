@@ -437,9 +437,12 @@ def test_demo(debug=False):
     # ========== Global Setup =========== #
     SP, MSK, (sk_CA, vk_CA) = dacmacs.setup()
 
+    secret_keys = {}
+
     # ===== Register Users and AAs ====== #
     user_info = { 'name': 'Alice', 'dob': '01-01-2000' }
     uid, (GPK, GSK), cert = dacmacs.user_registration(SP, sk_CA, user_info)
+    secret_keys[uid] = {}
 
     aid1 = dacmacs.attr_auth_registration("GOV")
     aid2 = dacmacs.attr_auth_registration("UT")
@@ -451,9 +454,8 @@ def test_demo(debug=False):
     public_keys = { aid1: pk1, aid2: pk2 }
     public_attr_keys = { **attr_keys1, **attr_keys2 }
 
-    secret_keys = {}
-    secret_keys[aid1] = dacmacs.secret_key_gen(SP, sk1, attr_keys1, [f'TOPSECRET@{aid1.upper()}'], cert)
-    secret_keys[aid2] = dacmacs.secret_key_gen(SP, sk2, attr_keys2, [f'EMPLOYEE@{aid2.upper()}'], cert)
+    secret_keys[uid][aid1] = dacmacs.secret_key_gen(SP, sk1, attr_keys1, [f'TOPSECRET@{aid1.upper()}'], cert)
+    secret_keys[uid][aid2] = dacmacs.secret_key_gen(SP, sk2, attr_keys2, [f'EMPLOYEE@{aid2.upper()}'], cert)
 
     # if debug:
     #     # ======== Attribute Authority Info ======== #
@@ -533,11 +535,14 @@ def test_demo(debug=False):
     #   Comment out secret_key_update to test for decryption failure
     #   Leaving it in should lead to successful decryption
     KUK, CUK = dacmacs.update_key_gen(SP, sk1, cert, attr_keys1[f'TOPSECRET@{aid1.upper()}']['version_key'])
-    secret_keys[aid1] = dacmacs.secret_key_update(secret_keys[aid1], KUK, f'TOPSECRET@{aid1.upper()}')
+    secret_keys[uid][aid1] = dacmacs.secret_key_update(
+        secret_keys[uid][aid1], KUK,
+        f'TOPSECRET@{aid1.upper()}'
+    )
     ciphertext = dacmacs.ciphertext_update(ciphertext, CUK, f'TOPSECRET@{aid1.upper()}')
 
     # ============= Decrypt ============= #
-    token = dacmacs.token_gen(ciphertext, GPK, secret_keys)
+    token = dacmacs.token_gen(ciphertext, GPK, secret_keys[uid])
     content_key = dacmacs.decrypt(ciphertext, token, GSK)
 
     if debug:    

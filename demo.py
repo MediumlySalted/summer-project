@@ -1,8 +1,11 @@
 import tkinter as tk
-from tkinter import ttk
+import base64, pickle
 from dacmacs import DACMACS
-from charm.toolbox.pairinggroup import PairingGroup
 from assets import COLORS
+from tkinter import ttk
+from charm.toolbox.pairinggroup import PairingGroup, GT
+from charm.core.engine.util import objectToBytes, bytesToObject
+from cryptography.fernet import Fernet
 
 class AccessControlDemo(tk.Tk):
     def __init__(self):
@@ -32,7 +35,7 @@ class AccessControlDemo(tk.Tk):
             # Populated by Users
             'ciphertexts': []
         }
-        self.current_user = None
+        self.files = []
 
         self.dacmacs = DACMACS()
 
@@ -87,6 +90,7 @@ class AccessControlDemo(tk.Tk):
             'GSK': GSK1,
             'certificate': cert1
         }
+        self.params['secret_keys'][uid1] = {}
         uid2, (GPK2, GSK2), cert2 = self.dacmacs.user_registration(SP, CA_sk, user2)
         self.params['users'][uid2] = {
             'info': user2,
@@ -94,6 +98,7 @@ class AccessControlDemo(tk.Tk):
             'GSK': GSK2,
             'certificate': cert2
         }
+        self.params['secret_keys'][uid2] = {}
 
         # Register Authorities
         auth1 = {
@@ -115,7 +120,6 @@ class AccessControlDemo(tk.Tk):
             'secret_key': None,
             'public_attribute_keys': None,
         }
-        self.params['secret_keys'][aid1] = {}
         aid2 = self.dacmacs.attr_auth_registration(auth2)
         self.params['authorities'][aid2] = {
             'info': auth2,
@@ -124,7 +128,6 @@ class AccessControlDemo(tk.Tk):
             'secret_key': None,
             'public_attribute_keys': None,
         }
-        self.params['secret_keys'][aid2] = {}
 
         # Add Attributes
         self.params['authorities'][aid1]['attributes'] = [
@@ -144,7 +147,7 @@ class AccessControlDemo(tk.Tk):
         sk1, pk1, attr_keys1 = self.dacmacs.attr_auth_setup(SP, aid1, attr_aid1)
         self.params['public_keys'][aid1] = pk1
         self.params['public_attr_keys'].update(attr_keys1)
-        self.params['secret_keys'][aid1][uid1] = self.dacmacs.secret_key_gen(
+        self.params['secret_keys'][uid1][aid1] = self.dacmacs.secret_key_gen(
             SP, sk1, attr_keys1, 
             attr_aid1, cert1
         )
@@ -152,7 +155,7 @@ class AccessControlDemo(tk.Tk):
         sk2, pk2, attr_keys2 = self.dacmacs.attr_auth_setup(SP, aid2, attr_aid2)
         self.params['public_keys'][aid2] = pk2
         self.params['public_attr_keys'].update(attr_keys2)
-        self.params['secret_keys'][aid2][uid1] = self.dacmacs.secret_key_gen(
+        self.params['secret_keys'][uid1][aid2] = self.dacmacs.secret_key_gen(
             SP, sk2, attr_keys2,
             attr_aid2, cert1
         )
@@ -262,10 +265,10 @@ class CAMenu(tk.Frame):
             info += f"   Birthday: {user['info']['birthday']}\n"
             info += f"   Password: {user['info']['password']}\n"
             info += f"   Attributes:\n"
-            for aid in self.controller.params['secret_keys']:
+            for aid in self.controller.params['secret_keys'][uid]:
                 auth = self.controller.params['authorities'][aid]['info']['name']
                 try:
-                    for attr in self.controller.params['secret_keys'][aid][uid]['AK'].keys():
+                    for attr in self.controller.params['secret_keys'][uid][aid]['AK'].keys():
                         info += f"    -{attr.split("@")[0]} ({auth})\n"
                 except: pass
 
@@ -368,7 +371,6 @@ class RegisterAAForm(BaseForm):
             'secret_key': None,
             'public_attribute_keys': None,
         }
-        self.controller.params['secret_keys'][aid] = {}
 
         self.clear_fields()
         self.controller.show_page(CAMenu)
@@ -408,6 +410,7 @@ class RegisterUserForm(BaseForm):
             'GSK': GSK,
             'certificate': cert
         }
+        self.controller.params['secret_keys'][uid] = {}
         self.clear_fields()
         self.controller.show_page(CAMenu)
 
@@ -734,7 +737,7 @@ class AssignAttributes(tk.Frame):
 
         # Check for list attributes already assigned
         user_attributes = []
-        try: user_attributes = list(self.controller.params['secret_keys'][self.aid][self.uid]['AK'].keys())
+        try: user_attributes = list(self.controller.params['secret_keys'][self.uid][self.aid]['AK'].keys())
         except KeyError: pass
 
         # List attributes
@@ -768,7 +771,7 @@ class AssignAttributes(tk.Frame):
         public_attr_keys.update(attr_keys)
 
         # Generate user related attribute keys
-        secret_keys[self.aid][self.uid] = self.controller.dacmacs.secret_key_gen(SP, sk, attr_keys, attributes, certificate)
+        secret_keys[self.uid][self.aid] = self.controller.dacmacs.secret_key_gen(SP, sk, attr_keys, attributes, certificate)
 
         self.controller.show_page(AAMenu, self.aid)
 
@@ -831,7 +834,7 @@ class RevokeAttributes(tk.Frame):
         self.user_label.config(text=f"Revoke attribute from {name}: ")
 
         # List user's assigned attributes
-        attributes = self.controller.params['secret_keys'][self.aid][self.uid]['AK'].keys()
+        attributes = self.controller.params['secret_keys'][self.uid][self.aid]['AK'].keys()
         for attr in attributes:
             attr_name = attr.split('@')[0]
             self.attr_listbox.insert(tk.END, attr_name)
@@ -934,10 +937,10 @@ class UserMenu(tk.Frame):
         self.info += f"  Password: {self.user['info']['password']}\n"
         self.info += f"\n"
         self.info += f"Your Attributes: \n"
-        for aid in self.controller.params['secret_keys']:
+        for aid in self.controller.params['secret_keys'][uid]:
             auth = self.controller.params['authorities'][aid]['info']['name']
             try:
-                for attr in self.controller.params['secret_keys'][aid][uid]['AK'].keys():
+                for attr in self.controller.params['secret_keys'][uid][aid]['AK'].keys():
                     self.info += f"  -{attr.split("@")[0]} ({auth})\n"
             except: pass
         self.info += f"\n"
@@ -950,6 +953,7 @@ class CreateFile(tk.Frame):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
         self.uid = None
+        self.file = None
 
         self.create_elements()
 
@@ -976,18 +980,44 @@ class CreateFile(tk.Frame):
         self.text_box.pack(pady=10, padx=30)
 
         ColorButton(self, 'Create Access Policy', command=self.create_access_policy).pack()
-        self.text_name.bind("<Return>", lambda event: self.create_access_policy())
-        self.text_box.bind("<Return>", lambda event: self.create_access_policy())
 
     def create_access_policy(self):
         file_name = self.text_name.get()
         file_content = self.text_box.get("1.0", tk.END)
-        message = (file_name, file_content)
-        self.controller.show_page(CreateAccessPolicy, self.uid, message)
+        self.file = (file_name, file_content)
+        self.controller.show_page(CreateAccessPolicy, self.uid, self.file)
 
     def show(self, uid):
         self.text_name.focus_set()
         self.uid = uid
+
+    def encrypt_file(self, access_policy):
+        SP = self.controller.params['SP']
+        public_keys = self.controller.params['public_keys']
+        public_attr_keys = self.controller.params['public_attr_keys']
+        sym_key_elem = self.controller.dacmacs.group.random(GT)
+
+        # Convert GT element to Fernet key
+        sym_key_bytes = objectToBytes(sym_key_elem, self.controller.dacmacs.group)
+        fernet_key = Fernet(base64.urlsafe_b64encode(sym_key_bytes[:32]))
+
+        # Encrypt file
+        file_bytes = pickle.dumps(self.file)
+        encrypted_file = fernet_key.encrypt(file_bytes)
+
+        # Encrypt GT element
+        ciphertext = self.controller.dacmacs.encrypt(
+            SP, public_keys, public_attr_keys,
+            sym_key_elem, access_policy
+        )
+
+        file_ct = {
+            "user": self.uid,
+            "ciphertext": ciphertext,
+            "encrypted_file": encrypted_file
+        }
+
+        self.controller.files.append(file_ct)
 
 
 class CreateAccessPolicy(tk.Frame):
@@ -995,11 +1025,11 @@ class CreateAccessPolicy(tk.Frame):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
 
-        self.authority_map = {}
-        self.uid = None
-        self.file_name = None
-        self.file_content = None
         self.policy_nodes = []  # Stores policy elements (attributes & operators)
+        self.authority_map = {} # Map Authority names to their uids
+        self.auth_name = None
+        self.uid = None
+        self.message = None
 
         self.create_elements()
 
@@ -1114,10 +1144,9 @@ class CreateAccessPolicy(tk.Frame):
 
     def show(self, uid, message):
         self.uid = uid
-        self.file_name, self.file_content = message
+        self.message = message
         self.update_authority_dropdown()
 
-    # ====== Event Handlers ====== #
     def update_authority_dropdown(self):
         self.authority_map.clear()
         auth_names = []
@@ -1134,17 +1163,16 @@ class CreateAccessPolicy(tk.Frame):
 
     def load_attributes(self, event=None):
         self.attr_listbox.delete(0, tk.END)
-        auth_name = self.authority_var.get()
-        aid = self.authority_map[auth_name]
+        self.auth_name = self.authority_var.get()
+        aid = self.authority_map[self.auth_name]
         attributes = self.controller.params["authorities"][aid]["attributes"]
         for attr in attributes:
             self.attr_listbox.insert(tk.END, attr.split("@")[0])
 
     def add_selected_attributes(self):
-        selected_indices = self.attr_listbox.curselection()
-        for i in selected_indices:
-            attr_name = self.attr_listbox.get(i)
-            self.policy_nodes.append(attr_name)
+        selected_index = self.attr_listbox.curselection()
+        attr_name = self.attr_listbox.get(selected_index)
+        self.policy_nodes.append(f'{attr_name}@{self.auth_name}')
 
         self.and_btn.configure(state='normal')
         self.or_btn.configure(state='normal')
@@ -1170,9 +1198,17 @@ class CreateAccessPolicy(tk.Frame):
         self.update_policy_preview()
 
     def save_policy(self):
+        for i, policy_node in enumerate(self.policy_nodes):
+            if i % 2 == 0:
+                attr, auth_name = policy_node.split("@")
+                self.policy_nodes[i] = f'{attr}@{self.authority_map[auth_name].upper()}'
+            
+            if i % 2 == 1:
+                self.policy_nodes[i] = policy_node.lower()
+
         policy_str = " ".join(self.policy_nodes)
-
-
+        self.controller.pages[CreateFile].encrypt_file(policy_str)
+        self.controller.show_page(UserMenu, self.uid)
 
 
 class SearchFile(tk.Frame):
@@ -1196,6 +1232,46 @@ class SearchFile(tk.Frame):
 
     def show(self, uid):
         self.uid = uid
+
+    def decrypt_file(self, file_ct, GPK, GSK, secret_keys):
+        ciphertext = file_ct["ciphertext"]
+
+        TK = self.controller.dacmacs.token_gen(ciphertext, GPK, secret_keys)
+        sym_key_elem = self.controller.dacmacs.decrypt(ciphertext, TK, GSK)
+
+        # Convert GT element to Fernet key
+        sym_key_bytes = objectToBytes(sym_key_elem, self.controller.dacmacs.group)
+        fernet_key = Fernet(base64.urlsafe_b64encode(sym_key_bytes[:32]))
+
+        file_bytes = fernet_key.decrypt(file_ct["encrypted_file"])
+        decrypted_file = pickle.loads(file_bytes)
+        self.controller.show_page(DisplayFile, self.uid, decrypted_file)
+
+
+class DisplayFile(tk.Frame):
+    def __init__(self, parent, controller):
+        tk.Frame.__init__(self, parent, background=COLORS['background'])
+        self.controller = controller
+
+        self.uid = None
+        self.decrypted_file = None
+
+        self.create_elements()
+
+    def create_elements(self):
+        self.navbar = TopNavBar(
+            self,
+            self.controller,
+            title="Decrypted Text File",
+            back_command=lambda: self.controller.show_page(UserMenu, self.uid),
+            quit_command=lambda: self.controller.quit()
+        )
+        self.navbar.pack(fill='both', pady=(0, 15))
+
+    def show(self, uid, decrypted_file):
+        self.uid = uid
+        self.file = decrypted_file
+
 
 # ========== Misc Menus ========== #
 class Logs(tk.Frame):
