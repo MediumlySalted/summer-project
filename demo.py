@@ -44,7 +44,7 @@ class AccessControlDemo(tk.Tk):
         self.pages = {}
         for F in (CAMenu, RegisterUserForm, RegisterAAForm, LoginAAForm, LoginUserForm,
                   AAMenu, CreateAttributes, SelectUser, AssignAttributes,
-                  UserMenu, CreateFile, CreateAccessPolicy, SearchFile, Logs):
+                  UserMenu, CreateFile, CreateAccessPolicy, SearchFile):
             frame = F(main_frame, self)
             self.pages[F] = frame
             frame.place(x=0, y=0, width=self.width, height=self.height)
