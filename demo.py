@@ -24,16 +24,13 @@ class AccessControlDemo(tk.Tk):
             'CA_vk': None,
 
             # Registered through CA
-            'authorities': {},
-            'users': {},
+            'authorities': {},  # aid: {info: {...}, attributes: [...], ...}
+            'users': {},        # uid: {info: {...}, files: {fname: fcontent}, ...}
 
             # Populated by AAs
-            'secret_keys': {},
-            'public_keys': {},
-            'public_attr_keys': {},
-
-            # Populated by Users
-            'ciphertexts': []
+            'secret_keys': {},      # {uid: {aid: sk}}
+            'public_keys': {},      # {aid: pk}
+            'public_attr_keys': {}, # {attr: {version_key: vk, public_attr_key: pak}}
         }
 
         self.dacmacs = DACMACS()
@@ -49,8 +46,9 @@ class AccessControlDemo(tk.Tk):
             self.pages[F] = frame
             frame.place(x=0, y=0, width=self.width, height=self.height)
 
-        self.show_page(CAMenu)
+        # Application Initialization
         self.setup_test()
+        self.show_page(CAMenu)
 
     def show_page(self, page_class, *args, **kwargs):
         page = self.pages[page_class]
@@ -64,127 +62,135 @@ class AccessControlDemo(tk.Tk):
         self.destroy()
 
     def setup_test(self):
-        # Test to hardcode users, authorities, and attributes
         SP = self.params['SP']
         CA_sk = self.params['CA_sk']
-        public_keys = self.params['public_keys']
-        public_attr_keys = self.params['public_attr_keys']
 
-        # Register Users
-        user1 = {
+        # Helper methods for creating test data
+        def add_user(user_info):
+            uid, (GPK, GSK), cert = self.dacmacs.user_registration(SP, CA_sk, user_info)
+            self.params['users'][uid] = {
+                'info': user_info,
+                'files': {},
+                'GPK': GPK,
+                'GSK': GSK,
+                'certificate': cert
+            }
+            self.params['secret_keys'][uid] = {}
+            return uid, cert
+
+        def add_authority(auth_info):
+            aid = self.dacmacs.attr_auth_registration(auth_info)
+            self.params['authorities'][aid] = {
+                'info': auth_info,
+                'attributes': None,
+                'public_key': None,
+                'secret_key': None,
+                'public_attribute_keys': None,
+            }
+            return aid
+
+        def setup_auth_attrs(aid, attributes):
+            full_attrs = [f'{attr.strip().upper()}@{aid.upper()}' for attr in attributes]
+            self.params['authorities'][aid]['attributes'] = full_attrs
+            return self.dacmacs.attr_auth_setup(SP, aid, full_attrs)
+
+        def assign_attrs(aid, sk, pk, attr_keys, uid, user_certificate, attrs):
+            self.params['public_keys'][aid] = pk
+            self.params['public_attr_keys'].update(attr_keys)
+            self.params['secret_keys'][uid][aid] = self.dacmacs.secret_key_gen(
+                SP, sk, attr_keys, attrs, user_certificate
+            )
+
+        def create_file(owner_uid, file_name, file_content, policy):
+            sym_key_elem = self.dacmacs.group.random(GT)
+            sym_key_bytes = objectToBytes(sym_key_elem, self.dacmacs.group)
+            fernet_key = Fernet(base64.urlsafe_b64encode(sym_key_bytes[:32]))
+
+            file_bytes = pickle.dumps((file_name, file_content))
+            encrypted_file = fernet_key.encrypt(file_bytes)
+
+            ciphertext = self.dacmacs.encrypt(
+                SP, self.params['public_keys'], self.params['public_attr_keys'],
+                sym_key_elem, policy
+            )
+
+            self.params['users'][owner_uid]['files'][file_name] = {
+                "ciphertext": ciphertext,
+                "encrypted_file": encrypted_file
+            }
+
+        # Creating users uid1 & uid2
+        uid1, cert1 = add_user({
             'name': 'Alice',
             'email': 'alice@email.com',
             'birthday': '01/01/2000',
             'password': 'password'
-        }
-        user2 = {
+        })
+        uid2, cert2 = add_user({
             'name': 'Bob',
             'email': 'bob@email.com',
             'birthday': '12/12/1999',
             'password': 'password'
-        }
+        })
 
-        uid1, (GPK1, GSK1), cert1 = self.dacmacs.user_registration(SP, CA_sk, user1)
-        self.params['users'][uid1] = {
-            'info': user1,
-            'files': {},
-            'GPK': GPK1,
-            'GSK': GSK1,
-            'certificate': cert1
-        }
-        self.params['secret_keys'][uid1] = {}
-        uid2, (GPK2, GSK2), cert2 = self.dacmacs.user_registration(SP, CA_sk, user2)
-        self.params['users'][uid2] = {
-            'info': user2,
-            'files': {},
-            'GPK': GPK2,
-            'GSK': GSK2,
-            'certificate': cert2
-        }
-        self.params['secret_keys'][uid2] = {}
-
-        # Register Authorities
-        auth1 = {
+        # Creating authorities aid1 & aid2
+        aid1 = add_authority({
             'name': 'Auth1',
             'email': 'auth1@email.com',
             'password': 'password'
-        }
-        auth2 = {
+        })
+        aid2 = add_authority({
             'name': 'Auth2',
             'email': 'auth2@email.com',
             'password': 'password'
-        }
+        })
 
-        aid1 = self.dacmacs.attr_auth_registration(auth1)
-        self.params['authorities'][aid1] = {
-            'info': auth1,
-            'attributes': None,
-            'public_key': None,
-            'secret_key': None,
-            'public_attribute_keys': None,
-        }
-        aid2 = self.dacmacs.attr_auth_registration(auth2)
-        self.params['authorities'][aid2] = {
-            'info': auth2,
-            'attributes': None,
-            'public_key': None,
-            'secret_key': None,
-            'public_attribute_keys': None,
-        }
+        # Add attributes to and setup authorities aid1 & aid2
+        sk1, pk1, attr_keys1 = setup_auth_attrs(aid1, [
+            'ATTRIBUTE1',
+            'ATTRIBUTE2',
+            'ATTRIBUTE5'
+        ])
+        sk2, pk2, attr_keys2 = setup_auth_attrs(aid2, [
+            'ATTRIBUTE3',
+            'ATTRIBUTE4'
+        ])
 
-        # Add Attributes
-        self.params['authorities'][aid1]['attributes'] = [
-            f'ATTRIBUTE1@{aid1.upper()}',
-            f'ATTRIBUTE2@{aid1.upper()}',
-            f'ATTRIBUTE5@{aid1.upper()}'
-            f'ATTRIBUTE3@{aid2.upper()}',
-        ]
-        self.params['authorities'][aid2]['attributes'] = [
-            f'ATTRIBUTE3@{aid2.upper()}',
-            f'ATTRIBUTE4@{aid2.upper()}',
-        ]
-
-        # Assign Attributes
-        attr_aid1 = [f'ATTRIBUTE1@{aid1.upper()}', f'ATTRIBUTE2@{aid1.upper()}']
-        attr_aid2 = [f'ATTRIBUTE3@{aid2.upper()}']
-
-        sk1, pk1, attr_keys1 = self.dacmacs.attr_auth_setup(SP, aid1, attr_aid1)
-        self.params['public_keys'][aid1] = pk1
-        self.params['public_attr_keys'].update(attr_keys1)
-        self.params['secret_keys'][uid1][aid1] = self.dacmacs.secret_key_gen(
-            SP, sk1, attr_keys1, 
-            attr_aid1, cert1
+        # Assinging some attributes from aid1 & aid2 to uid1
+        assign_attrs(
+            aid1, sk1, pk1, attr_keys1, uid1, cert1,
+            [f'ATTRIBUTE1@{aid1.upper()}', f'ATTRIBUTE2@{aid1.upper()}']
+        )
+        assign_attrs(
+            aid2, sk2, pk2, attr_keys2, uid1, cert1,
+            [f'ATTRIBUTE3@{aid2.upper()}']
         )
 
-        sk2, pk2, attr_keys2 = self.dacmacs.attr_auth_setup(SP, aid2, attr_aid2)
-        self.params['public_keys'][aid2] = pk2
-        self.params['public_attr_keys'].update(attr_keys2)
-        self.params['secret_keys'][uid1][aid2] = self.dacmacs.secret_key_gen(
-            SP, sk2, attr_keys2,
-            attr_aid2, cert1
+        # Assining some attributes from aid1 & aid2 to uid2
+        assign_attrs(
+            aid1, sk1, pk1, attr_keys1, uid2, cert2,
+            [f'ATTRIBUTE2@{aid1.upper()}']
+        )
+        assign_attrs(
+            aid2, sk2, pk2, attr_keys2, uid2, cert2,
+            [f'ATTRIBUTE3@{aid2.upper()}']
         )
 
-        # Create File
-        f = ("Test Name", "Example text line 1\nExample text line 2\n")
-        access_policy = f'ATTRIBUTE1@{aid1.upper()} and ATTRIBUTE2@{aid1.upper()}'
-        sym_key_elem = self.dacmacs.group.random(GT)
-        sym_key_bytes = objectToBytes(sym_key_elem, self.dacmacs.group)
-        fernet_key = Fernet(base64.urlsafe_b64encode(sym_key_bytes[:32]))
-
-        file_bytes = pickle.dumps(f)
-        encrypted_file = fernet_key.encrypt(file_bytes)
-
-        ciphertext = self.dacmacs.encrypt(
-            SP, public_keys, public_attr_keys,
-            sym_key_elem, access_policy
+        # Creating files under uid1 & uid2
+        create_file(
+            uid1, "Example File 1",
+            "Example text file created by Alice\n"
+            "Have a wonderful day :)\n"
+            "-Alice\n",
+            f'ATTRIBUTE1@{aid1.upper()} and ATTRIBUTE2@{aid1.upper()}'
         )
-
-        file_ct = {
-            "ciphertext": ciphertext,
-            "encrypted_file": encrypted_file
-        }
-
-        self.params['users'][uid1]['files'][f[0]] = file_ct
+        create_file(
+            uid2, "Example File 2",
+            "Example text file created by Bob\n"
+            "Have a joyous day\n"
+            "-Bob\n",
+            f'ATTRIBUTE2@{aid1.upper()} or ATTRIBUTE3@{aid2.upper()}'
+        )
 
 
 # =========== CAMenus =========== #
@@ -242,20 +248,12 @@ class CAMenu(tk.Frame):
             width=20,
             command=lambda: self.controller.show_page(LoginAAForm)
         ).pack(pady=8)
-        # View Info Buttons
-        ColorButton(
-            btn_frame,
-            "View System Info",
-            color=COLORS['btn_warning'].light(),
-            width=20,
-            command=self.view_system_info
-        ).pack(pady=8)
 
     def create_infobox(self):
         self.sysinfo_text = tk.Text(
             self,
-            width=80,
-            height=10,
+            width=75,
+            height=30,
             foreground=COLORS['text_secondary'],
             background=COLORS['background'].light()
         )
@@ -263,33 +261,44 @@ class CAMenu(tk.Frame):
         self.sysinfo_text.insert("1.0", "System not initialized.\n")
         self.sysinfo_text.config(state="disabled")
 
-    def view_system_info(self):
+    def show(self):
+        self.update_system_info()
+
+    def update_system_info(self):
         info = ""
 
-        info += "Registered Authorities:\n"
+        info += "\n-----====|| Registered Authorities ||====-----\n"
         for aid, user in self.controller.params['authorities'].items():
-            info += f" -{user['info']['name']}\n"
-            info += f"   Email: {user['info']['email']}\n"
-            info += f"   Password: {user['info']['password']}\n"
-            info += f"   Attributes:\n"
+            info += f"\n{user['info']['name']}: \n"
+            info += f"  Email: {user['info']['email']}\n"
+            info += f"  Password: {user['info']['password']}\n"
+
+            info += f"  Attributes: \n"
             try:
                 for attr in self.controller.params['authorities'][aid]['attributes']:
-                    info += f"    -{attr.split("@")[0]}\n"
+                    info += f"   -{attr.split("@")[0]}\n"
             except: pass
 
-        info += "\nRegistered Users:\n"
+        info += "\n\n-----====|| Registered Users ||====-----\n"
         for uid, user in self.controller.params['users'].items():
-            info += f" -{user['info']['name']}\n"
-            info += f"   Email: {user['info']['email']}\n"
-            info += f"   Birthday: {user['info']['birthday']}\n"
-            info += f"   Password: {user['info']['password']}\n"
-            info += f"   Attributes:\n"
-            for aid in self.controller.params['secret_keys'][uid]:
-                auth = self.controller.params['authorities'][aid]['info']['name']
-                try:
+            info += f"\n{user['info']['name']}: \n"
+            info += f"  Email: {user['info']['email']}\n"
+            info += f"  Birthday: {user['info']['birthday']}\n"
+            info += f"  Password: {user['info']['password']}\n"
+
+            info += f"\n  Attributes: \n"
+            try: 
+                for aid in self.controller.params['secret_keys'][uid]:
+                    auth = self.controller.params['authorities'][aid]['info']['name']
                     for attr in self.controller.params['secret_keys'][uid][aid]['AK'].keys():
-                        info += f"    -{attr.split("@")[0]} ({auth})\n"
-                except: pass
+                        info += f"   -{attr.split("@")[0]} ({auth})\n"
+            except: pass
+
+            info += f"\n  Files: \n"
+            try:
+                for fname in self.controller.params['users'][uid]['files'].keys():
+                    info += f"   -{fname}\n"
+            except: pass
 
         self.sysinfo_text.config(state="normal")
         self.sysinfo_text.delete("1.0", tk.END)
