@@ -35,7 +35,6 @@ class AccessControlDemo(tk.Tk):
             # Populated by Users
             'ciphertexts': []
         }
-        self.files = []
 
         self.dacmacs = DACMACS()
 
@@ -68,6 +67,8 @@ class AccessControlDemo(tk.Tk):
         # Test to hardcode users, authorities, and attributes
         SP = self.params['SP']
         CA_sk = self.params['CA_sk']
+        public_keys = self.params['public_keys']
+        public_attr_keys = self.params['public_attr_keys']
 
         # Register Users
         user1 = {
@@ -86,6 +87,7 @@ class AccessControlDemo(tk.Tk):
         uid1, (GPK1, GSK1), cert1 = self.dacmacs.user_registration(SP, CA_sk, user1)
         self.params['users'][uid1] = {
             'info': user1,
+            'files': {},
             'GPK': GPK1,
             'GSK': GSK1,
             'certificate': cert1
@@ -94,6 +96,7 @@ class AccessControlDemo(tk.Tk):
         uid2, (GPK2, GSK2), cert2 = self.dacmacs.user_registration(SP, CA_sk, user2)
         self.params['users'][uid2] = {
             'info': user2,
+            'files': {},
             'GPK': GPK2,
             'GSK': GSK2,
             'certificate': cert2
@@ -134,6 +137,7 @@ class AccessControlDemo(tk.Tk):
             f'ATTRIBUTE1@{aid1.upper()}',
             f'ATTRIBUTE2@{aid1.upper()}',
             f'ATTRIBUTE5@{aid1.upper()}'
+            f'ATTRIBUTE3@{aid2.upper()}',
         ]
         self.params['authorities'][aid2]['attributes'] = [
             f'ATTRIBUTE3@{aid2.upper()}',
@@ -159,6 +163,28 @@ class AccessControlDemo(tk.Tk):
             SP, sk2, attr_keys2,
             attr_aid2, cert1
         )
+
+        # Create File
+        f = ("Test Name", "Example text line 1\nExample text line 2\n")
+        access_policy = f'ATTRIBUTE1@{aid1.upper()} and ATTRIBUTE2@{aid1.upper()}'
+        sym_key_elem = self.dacmacs.group.random(GT)
+        sym_key_bytes = objectToBytes(sym_key_elem, self.dacmacs.group)
+        fernet_key = Fernet(base64.urlsafe_b64encode(sym_key_bytes[:32]))
+
+        file_bytes = pickle.dumps(f)
+        encrypted_file = fernet_key.encrypt(file_bytes)
+
+        ciphertext = self.dacmacs.encrypt(
+            SP, public_keys, public_attr_keys,
+            sym_key_elem, access_policy
+        )
+
+        file_ct = {
+            "ciphertext": ciphertext,
+            "encrypted_file": encrypted_file
+        }
+
+        self.params['users'][uid1]['files'][f[0]] = file_ct
 
 
 # =========== CAMenus =========== #
@@ -223,13 +249,6 @@ class CAMenu(tk.Frame):
             color=COLORS['btn_warning'].light(),
             width=20,
             command=self.view_system_info
-        ).pack(pady=8)
-        ColorButton(
-            btn_frame,
-            "View Logs",
-            color=COLORS['btn_error'],
-            width=20,
-            command=lambda: self.controller.show_page(Logs)
         ).pack(pady=8)
 
     def create_infobox(self):
@@ -406,6 +425,7 @@ class RegisterUserForm(BaseForm):
         uid, (GPK, GSK), cert = self.controller.dacmacs.user_registration(SP, CA_sk, user_info)
         self.controller.params['users'][uid] = {
             'info': user_info,
+            'files': {},
             'GPK': GPK,
             'GSK': GSK,
             'certificate': cert
@@ -1012,12 +1032,11 @@ class CreateFile(tk.Frame):
         )
 
         file_ct = {
-            "user": self.uid,
             "ciphertext": ciphertext,
             "encrypted_file": encrypted_file
         }
 
-        self.controller.files.append(file_ct)
+        self.controller.params['users'][self.uid]['files'][self.file[0]] = file_ct
 
 
 class CreateAccessPolicy(tk.Frame):
@@ -1217,78 +1236,129 @@ class SearchFile(tk.Frame):
         self.controller = controller
 
         self.uid = None
-
+        self.file = None
+        self.users = None
+        self.selected_uid = None
+        self.selected_user = tk.StringVar(value="")
+        self.selected_file = tk.StringVar()
         self.create_elements()
 
     def create_elements(self):
         self.navbar = TopNavBar(
             self,
             self.controller,
-            title="Decrypt Text File",
-            back_command=lambda: self.controller.show_page(UserMenu, self.uid),
+            title="Search & Decrypt File",
+            back_command=lambda: self.controller.show_page(UserMenu),
             quit_command=lambda: self.controller.quit()
         )
-        self.navbar.pack(fill='both', pady=(0, 15))
+        self.navbar.pack(fill='x', pady=(0, 20))
+
+        self.form_frame = tk.Frame(self, background=COLORS['background'])
+        self.form_frame.pack(pady=10, fill="x")
+
+        self.create_user_selection()
+        self.create_file_selection()
+        self.create_file_display()
+
+    def create_user_selection(self):
+        ColorLabel(self.form_frame, "Select User:").grid(row=0, column=0, sticky="e", padx=10, pady=5)
+
+        self.user_menu = tk.OptionMenu(
+            self.form_frame,
+            self.selected_user,
+            *'Select User',
+        )
+        self.user_menu.config(width=20)
+        self.user_menu.grid(row=0, column=1, padx=10, pady=5, sticky="w")
+        self.selected_user.trace_add("write", self.populate_files)
+
+    def create_file_selection(self):
+        ColorLabel(self.form_frame, "Files: ").grid(row=1, column=0, sticky="ne", padx=10, pady=5)
+
+        self.file_listbox = tk.Listbox(self.form_frame, width=40, height=8)
+        self.file_listbox.grid(row=1, column=1, padx=10, pady=5, sticky="w")
+
+        # Decrypt button
+        ColorButton(
+            self,
+            text="Decrypt File",
+            color=COLORS['btn_primary'],
+            width=20,
+            command=self.decrypt_selected_file
+        ).pack(pady=15)
+
+    def create_file_display(self):
+        self.result_label = ColorLabel(self, "Decrypted File: ")
+        self.result_label.pack(pady=(20, 5))
+
+        self.result_text = tk.Text(
+            self, width=80, height=10, wrap="word",
+            bg=COLORS['background'].light(), fg=COLORS['text_primary']
+        )
+        self.result_text.pack(pady=5)
 
     def show(self, uid):
         self.uid = uid
 
-    def decrypt_file(self, file_ct, GPK, GSK, secret_keys):
-        ciphertext = file_ct["ciphertext"]
+        # Populate user list
+        users = self.controller.params.get('users', {})
+        if users:
+            menu = self.user_menu["menu"]
+            menu.delete(0, "end")
+            for uid, user in users.items():
+                name = user['info']['name']
+                menu.add_command(
+                    label=name,
+                    command=lambda x=uid, y=name: self.select_user(x, y)
+                )
 
-        TK = self.controller.dacmacs.token_gen(ciphertext, GPK, secret_keys)
-        sym_key_elem = self.controller.dacmacs.decrypt(ciphertext, TK, GSK)
+    def select_user(self, uid, name):
+        self.selected_uid = uid
+        self.selected_user.set(name)
 
-        # Convert GT element to Fernet key
-        sym_key_bytes = objectToBytes(sym_key_elem, self.controller.dacmacs.group)
-        fernet_key = Fernet(base64.urlsafe_b64encode(sym_key_bytes[:32]))
+    def populate_files(self, *args):
+        # Populate the listbox with files created by the selected user
+        self.file_listbox.delete(0, tk.END)
+        files = self.controller.params['users'][self.selected_uid].get('files', {})
+        for fname in files.keys():
+            self.file_listbox.insert(tk.END, fname)
 
-        file_bytes = fernet_key.decrypt(file_ct["encrypted_file"])
-        decrypted_file = pickle.loads(file_bytes)
-        self.controller.show_page(DisplayFile, self.uid, decrypted_file)
+    def decrypt_selected_file(self):
+        selection = self.file_listbox.curselection()
+        if not self.selected_uid or not selection:
+            self.result_text.delete("1.0", tk.END)
+            self.result_text.insert(tk.END, "No user or file selected.")
+            return
+        
+        file_name = self.file_listbox.get(selection[0])
+        try:
+            file_ct = self.controller.params['users'][self.selected_uid]['files'][file_name]
+            GPK = self.controller.params['users'][self.uid]['GPK']
+            GSK = self.controller.params['users'][self.uid]['GSK']
+            secret_keys = self.controller.params['secret_keys'][self.uid]
 
+            # Generate decryption token
+            TK = self.controller.dacmacs.token_gen(file_ct['ciphertext'], GPK, secret_keys)
+            sym_key_elem = self.controller.dacmacs.decrypt(file_ct['ciphertext'], TK, GSK)
 
-class DisplayFile(tk.Frame):
-    def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent, background=COLORS['background'])
-        self.controller = controller
+            # Convert GT element to Fernet key
+            sym_key_bytes = objectToBytes(sym_key_elem, self.controller.dacmacs.group)
+            fernet_key = Fernet(base64.urlsafe_b64encode(sym_key_bytes[:32]))
 
-        self.uid = None
-        self.decrypted_file = None
+            # Decrypt file
+            file_bytes = fernet_key.decrypt(file_ct["encrypted_file"])
+            decrypted_file = pickle.loads(file_bytes)
+            fname, fcontent = decrypted_file
+            
+            # Display file
+            self.result_label.configure(text=f'Decrypted File: {fname}')
+            self.result_text.delete("1.0", tk.END)
+            self.result_text.insert(tk.END, fcontent)
 
-        self.create_elements()
-
-    def create_elements(self):
-        self.navbar = TopNavBar(
-            self,
-            self.controller,
-            title="Decrypted Text File",
-            back_command=lambda: self.controller.show_page(UserMenu, self.uid),
-            quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='both', pady=(0, 15))
-
-    def show(self, uid, decrypted_file):
-        self.uid = uid
-        self.file = decrypted_file
-
-
-# ========== Misc Menus ========== #
-class Logs(tk.Frame):
-    def __init__(self, parent, controller):
-        tk.Frame.__init__(self, parent, background=COLORS['background'])
-        self.controller = controller
-        self.create_elements()
-    
-    def create_elements(self):
-        self.navbar = TopNavBar(
-            self,
-            self.controller,
-            title="Create New Attributes",
-            back_command=lambda: self.controller.show_page(CAMenu),
-            quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='both', pady=(0, 15))
+        except Exception as e:
+            self.result_label.configure(text=f'Decrypted File: ')
+            self.result_text.delete("1.0", tk.END)
+            self.result_text.insert(tk.END, f'ERROR: {e}')
 
 
 # =========== Widgets ============ #
@@ -1304,27 +1374,28 @@ class TopNavBar(tk.Frame):
 
         self.color = COLORS['background'].light(1.15)
 
-        if back_command:
-            back_btn = ColorButton(
-                self,
-                text="← Back",
-                color=self.color,
-                height=3,
-                width=7,
-                command=back_command
-            )
-            back_btn.pack(side="left")
+        back_btn = ColorButton(
+            self,
+            text="← Back",
+            color=self.color,
+            height=3,
+            width=7,
+            command=back_command
+        )
+        back_btn.pack(side="left")
 
-        if quit_command:
-            back_btn = ColorButton(
-                self,
-                text="X",
-                color=self.color,
-                height=3,
-                width=7,
-                command=quit_command
-            )
-            back_btn.pack(side="right")
+        quit_btn = ColorButton(
+            self,
+            text="X",
+            color=self.color,
+            height=3,
+            width=7,
+            command=quit_command
+        )
+        quit_btn.pack(side="right")
+
+        if not back_command: back_btn.configure(text='', state='disabled')
+        if not quit_command: quit_btn.configure(text='', state='disabled')
 
         self.title_label = tk.Label(
             self,
