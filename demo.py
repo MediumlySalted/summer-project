@@ -3,7 +3,7 @@ import base64, pickle
 from dacmacs import DACMACS
 from assets import COLORS
 from tkinter import ttk
-from charm.toolbox.pairinggroup import PairingGroup, GT
+from charm.toolbox.pairinggroup import GT
 from charm.core.engine.util import objectToBytes, bytesToObject
 from cryptography.fernet import Fernet
 
@@ -13,8 +13,8 @@ class AccessControlDemo(tk.Tk):
         self.width = 1024
         self.height = 768
         self.geometry(f"{self.width}x{self.height}")
-        self.title('Tic-Tac-Sweep')
-        self.config(background='#808080')
+        self.title('DACMACS Demo')
+        self.configure(background='#808080')
 
         # Global variables used across the application
         self.params = {
@@ -40,8 +40,8 @@ class AccessControlDemo(tk.Tk):
         main_frame.pack()
         self.pages = {}
         for F in (CAMenu, RegisterUserForm, RegisterAAForm, LoginAAForm, LoginUserForm,
-                  AAMenu, CreateAttributes, SelectUser, AssignAttributes,
-                  UserMenu, CreateFile, CreateAccessPolicy, SearchFile):
+                  AAMenu, CreateAttributes, SelectUser, AssignAttributes, RevokeAttributes,
+                  UserMenu, CreateFile, CreateAccessPolicy, ViewFile):
             frame = F(main_frame, self)
             self.pages[F] = frame
             frame.place(x=0, y=0, width=self.width, height=self.height)
@@ -259,7 +259,7 @@ class CAMenu(tk.Frame):
         )
         self.sysinfo_text.pack(pady=20)
         self.sysinfo_text.insert("1.0", "System not initialized.\n")
-        self.sysinfo_text.config(state="disabled")
+        self.sysinfo_text.configure(state="disabled")
 
     def show(self):
         self.update_system_info()
@@ -300,10 +300,10 @@ class CAMenu(tk.Frame):
                     info += f"   -{fname}\n"
             except: pass
 
-        self.sysinfo_text.config(state="normal")
+        self.sysinfo_text.configure(state="normal")
         self.sysinfo_text.delete("1.0", tk.END)
         self.sysinfo_text.insert("1.0", info)
-        self.sysinfo_text.config(state="disabled")
+        self.sysinfo_text.configure(state="disabled")
 
 
 class BaseForm(tk.Frame):
@@ -494,9 +494,6 @@ class LoginUserForm(BaseForm):
 
 # =========== AAMenus =========== #
 class AAMenu(tk.Frame):
-    '''
-    Attribute Authority menu for handling and directing AA related operations.
-    '''
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
@@ -529,7 +526,14 @@ class AAMenu(tk.Frame):
             "Assign Attributes",
             color=COLORS['btn_primary'],
             width=20,
-            command=lambda: self.controller.show_page(SelectUser, self.aid)
+            command=lambda: self.controller.show_page(SelectUser, AssignAttributes, self.aid)
+        ).pack(pady=8)
+        ColorButton(
+            btn_frame,
+            "Revoke Attributes",
+            color=COLORS['btn_warning'],
+            width=20,
+            command=lambda: self.controller.show_page(SelectUser, RevokeAttributes, self.aid)
         ).pack(pady=8)
 
     def show(self, aid):
@@ -539,9 +543,6 @@ class AAMenu(tk.Frame):
 
 
 class CreateAttributes(tk.Frame):
-    '''
-    Page for AA to create attributes.
-    '''
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
@@ -652,11 +653,12 @@ class CreateAttributes(tk.Frame):
 
 class SelectUser(tk.Frame):
     '''
-    Page for AA to select a user for assigning/revoking attributes.
+    Page for selecting a user to afterwards assign/revoke attributes to/from
     '''
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
+        self.next_page = None  # Next page after user selection (assign/revoke attributes)
         self.aid = None
         self.uids = []
 
@@ -683,7 +685,8 @@ class SelectUser(tk.Frame):
             command=self.select_user
         ).pack()
 
-    def show(self, aid):
+    def show(self, next_page, aid):
+        self.next_page = next_page
         self.aid = aid
         self.uids = []
         self.refresh_users()
@@ -702,13 +705,11 @@ class SelectUser(tk.Frame):
 
         index = selection[0]
         uid = self.uids[index]
-        self.controller.show_page(AssignAttributes, self.aid, uid)
+
+        self.controller.show_page(self.next_page, self.aid, uid)
 
 
 class AssignAttributes(tk.Frame):
-    '''
-    Page for AA to assign attributes to users.
-    '''
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
@@ -724,7 +725,7 @@ class AssignAttributes(tk.Frame):
             self,
             self.controller,
             title="Assign Attributes",
-            back_command=lambda: self.controller.show_page(AAMenu, self.aid),
+            back_command=lambda: self.controller.show_page(SelectUser, self.aid),
             quit_command=lambda: self.controller.quit()
         )
         self.navbar.pack(fill='both', pady=(0, 15))
@@ -761,7 +762,7 @@ class AssignAttributes(tk.Frame):
         # Clear and update page elements
         self.attr_listbox.delete(0, tk.END)
         name = self.controller.params['users'][self.uid]['info']['name']
-        self.user_label.config(text=f"Assigning Attributes to {name}: ")
+        self.user_label.configure(text=f"Assigning Attributes to {name}: ")
         attributes = self.controller.params['authorities'][self.aid]['attributes']
 
         # Check for list attributes already assigned
@@ -792,7 +793,7 @@ class AssignAttributes(tk.Frame):
 
         # Authenticate user
         if not self.controller.dacmacs.verify_certificate(SP, certificate, CA_vk):
-            self.user_label.config(text=f"Unable to verify user!")
+            self.user_label.configure(text=f"Unable to verify user!")
 
         # Generate authority related attribute keys
         sk, pk, attr_keys = self.controller.dacmacs.attr_auth_setup(SP, self.aid, attributes)
@@ -806,9 +807,6 @@ class AssignAttributes(tk.Frame):
 
 
 class RevokeAttributes(tk.Frame):
-    '''
-    Page for AA to revoke attributes from users.
-    '''
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
@@ -848,7 +846,7 @@ class RevokeAttributes(tk.Frame):
             self,
             text="Revoke Attributes",
             color=COLORS["btn_success"],
-            command=self.assign_attributes
+            command=self.revoke_attribute
         ).pack(pady=20)
 
     def show(self, aid, uid):
@@ -860,7 +858,7 @@ class RevokeAttributes(tk.Frame):
         # Clear and update page elements
         self.attr_listbox.delete(0, tk.END)
         name = self.controller.params['users'][self.uid]['info']['name']
-        self.user_label.config(text=f"Revoke attribute from {name}: ")
+        self.user_label.configure(text=f"Select an attribute to revoke from {name}")
 
         # List user's assigned attributes
         attributes = self.controller.params['secret_keys'][self.uid][self.aid]['AK'].keys()
@@ -868,7 +866,9 @@ class RevokeAttributes(tk.Frame):
             attr_name = attr.split('@')[0]
             self.attr_listbox.insert(tk.END, attr_name)
 
-    def revoke_attribute(self, attribute):
+    def revoke_attribute(self):
+        attribute = self.attr_listbox.get()
+        print(f'Revoking attribute: {attribute}')
         self.generate_update_keys()
         self.update_user_keys()
         self.update_ciphertext()
@@ -926,7 +926,7 @@ class UserMenu(tk.Frame):
             "Search File",
             color=COLORS['btn_primary'],
             width=20,
-            command=lambda: self.controller.show_page(SearchFile, self.uid)
+            command=lambda: self.controller.show_page(ViewFile, self.uid)
         ).pack(pady=8)
 
     def create_infobox(self):
@@ -957,7 +957,7 @@ class UserMenu(tk.Frame):
         self.navbar.title_label.configure(text=f"Logged in as {name}")
 
         # Add text to infobox
-        self.infobox.config(state="normal")
+        self.infobox.configure(state="normal")
         self.infobox.delete("1.0", tk.END)
         self.info = ""
         self.info += f"Personal Info: \n"
@@ -974,7 +974,7 @@ class UserMenu(tk.Frame):
             except: pass
         self.info += f"\n"
         self.infobox.insert("1.0", self.info)
-        self.infobox.config(state="disabled")
+        self.infobox.configure(state="disabled")
 
 
 class CreateFile(tk.Frame):
@@ -1016,9 +1016,19 @@ class CreateFile(tk.Frame):
         self.file = (file_name, file_content)
         self.controller.show_page(CreateAccessPolicy, self.uid, self.file)
 
-    def show(self, uid):
+    def show(self, uid, f=None):
         self.text_name.focus_set()
         self.uid = uid
+
+        self.reset_widgets(f)
+
+    def reset_widgets(self, f):
+        self.text_name.delete(0, tk.END)
+        self.text_box.delete("1.0", tk.END)
+
+        if f:
+            self.text_name.insert(0, f[0])
+            self.text_box.insert("1.0", f[1])
 
     def encrypt_file(self, access_policy):
         SP = self.controller.params['SP']
@@ -1057,7 +1067,7 @@ class CreateAccessPolicy(tk.Frame):
         self.authority_map = {} # Map Authority names to their uids
         self.auth_name = None
         self.uid = None
-        self.message = None
+        self.file = None
 
         self.create_elements()
 
@@ -1072,7 +1082,7 @@ class CreateAccessPolicy(tk.Frame):
             self,
             self.controller,
             title="Build Access Policy",
-            back_command=lambda: self.controller.show_page(CreateFile, self.uid),
+            back_command=lambda: self.controller.show_page(CreateFile, self.uid, self.file),
             quit_command=lambda: self.controller.quit()
         )
         self.navbar.pack(fill='x', pady=(0, 20))
@@ -1170,9 +1180,9 @@ class CreateAccessPolicy(tk.Frame):
             font=("Arial", 12)
         )
 
-    def show(self, uid, message):
+    def show(self, uid, f):
         self.uid = uid
-        self.message = message
+        self.file = f
         self.update_authority_dropdown()
 
     def update_authority_dropdown(self):
@@ -1219,7 +1229,7 @@ class CreateAccessPolicy(tk.Frame):
 
     def update_policy_preview(self):
         preview_str = " ".join(self.policy_nodes)
-        self.canvas.itemconfig(self.preview_text, text=preview_str)
+        self.canvas.itemconfigure(self.preview_text, text=preview_str)
 
     def clear_policy(self):
         self.policy_nodes.clear()
@@ -1239,7 +1249,7 @@ class CreateAccessPolicy(tk.Frame):
         self.controller.show_page(UserMenu, self.uid)
 
 
-class SearchFile(tk.Frame):
+class ViewFile(tk.Frame):
     def __init__(self, parent, controller):
         tk.Frame.__init__(self, parent, background=COLORS['background'])
         self.controller = controller
@@ -1257,7 +1267,7 @@ class SearchFile(tk.Frame):
             self,
             self.controller,
             title="Search & Decrypt File",
-            back_command=lambda: self.controller.show_page(UserMenu),
+            back_command=lambda: self.controller.show_page(UserMenu, self.uid),
             quit_command=lambda: self.controller.quit()
         )
         self.navbar.pack(fill='x', pady=(0, 20))
@@ -1275,9 +1285,9 @@ class SearchFile(tk.Frame):
         self.user_menu = tk.OptionMenu(
             self.form_frame,
             self.selected_user,
-            *'Select User',
+            *'No Users',
         )
-        self.user_menu.config(width=20)
+        self.user_menu.configure(width=20)
         self.user_menu.grid(row=0, column=1, padx=10, pady=5, sticky="w")
         self.selected_user.trace_add("write", self.populate_files)
 
@@ -1308,7 +1318,15 @@ class SearchFile(tk.Frame):
 
     def show(self, uid):
         self.uid = uid
+        self.reset()
 
+    def reset(self):
+        self.selected_user.set("")
+        self.user_menu["menu"].delete(0, tk.END)
+        self.file_listbox.delete(0, tk.END)
+        self.result_label.configure(text="Decrypted File: ")
+        self.result_text.delete("1.0", tk.END)
+    
         # Populate user list
         users = self.controller.params.get('users', {})
         if users:
