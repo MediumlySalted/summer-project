@@ -322,9 +322,10 @@ class DACMACS:
         if not pruned:
             raise Exception("Policy not satisfied by user's attributes")
 
+        N_A = len(secret_keys.keys())
+
         # Compute token pairing components
         TK = self.group.init(GT, 1)
-        N_A = len(secret_keys)
         for aid, sk in secret_keys.items():
             dividend = (
                 pair(CT['C1'], sk['K']) *           # e(C', K)
@@ -369,7 +370,7 @@ class DACMACS:
         return K
 
     # ====== Attribute Revocation ======= #
-    def update_key_gen(self, SP, ASK, certificate, old_vk):
+    def update_key_gen(self, SP, ASK, pak):
         """UKeyGen
 
         The update key generation algorithm takes as inputs the secret
@@ -380,22 +381,29 @@ class DACMACS:
         Parameters:
             SP - system parameters
             ASK - secret authority key
-            certificate - user's certificate which contains u
-            old_vk - version key of the revoked attribute
+            pak - public attribute key of the revoked attribute
 
         Returns:
             KUK - user's key update key
             CUK - ciphertext update key
         """
+        old_vk = pak['version_key']
         new_vk = self.group.random(ZR)
 
         AUK = ASK['gamma'] * (old_vk - new_vk)
-        KUK = SP['g'] ** (certificate['message']['u'] * ASK['beta'] * AUK)
+
+        old_pak = pak['public_attr_key']
+        new_pak = old_pak * SP['g'] ** AUK
+        PK = {
+            'public_attr_key': new_pak,
+            'version_key': new_vk
+        }
+
         CUK = ASK['beta'] * AUK / ASK['gamma']
 
-        return (KUK, CUK)
+        return (PK, AUK, CUK)
 
-    def secret_key_update(self, secret_key, KUK, attribute):
+    def secret_key_update(self, SP, ASK, AUK, certificate, secret_key, attribute):
         """SKUpdate
 
         The user's secret key update algorithm takes as inputs the
@@ -403,6 +411,10 @@ class DACMACS:
         secret key.
 
         Parameters:
+            SP - system parameters
+            ASK - secret authority key
+            AUK - attribute update key (from update_key_gen)
+            certificate - user's certificate
             secret_key - user's secret key
             KUK - user's key update key
             attribute - revoked attribute
@@ -410,6 +422,7 @@ class DACMACS:
         Returns:
             AK' - Updated attribute key
         """
+        KUK = SP['g'] ** (certificate['message']['u'] * ASK['beta'] * AUK)
         secret_key['AK'][attribute] = secret_key['AK'][attribute] * KUK
         return secret_key
 
@@ -428,7 +441,7 @@ class DACMACS:
         Returns:
             CT - new ciphertext
         """
-        CT['C'][attribute] = CT['C'][attribute] * (CT['D2'][attribute] ** CUK)
+        CT['C'][attribute] *= CT['D2'][attribute] ** CUK
         return CT
 
 def test_demo(debug=False):
@@ -440,9 +453,9 @@ def test_demo(debug=False):
     secret_keys = {}
 
     # ===== Register Users and AAs ====== #
-    user_info = { 'name': 'Alice', 'dob': '01-01-2000' }
-    uid, (GPK, GSK), cert = dacmacs.user_registration(SP, sk_CA, user_info)
-    secret_keys[uid] = {}
+    user_info1 = { 'name': 'Alice', 'dob': '01-01-2000' }
+    uid1, (GPK1, GSK1), cert1 = dacmacs.user_registration(SP, sk_CA, user_info1)
+    secret_keys[uid1] = {}
 
     aid1 = dacmacs.attr_auth_registration("GOV")
     aid2 = dacmacs.attr_auth_registration("UT")
@@ -454,8 +467,8 @@ def test_demo(debug=False):
     public_keys = { aid1: pk1, aid2: pk2 }
     public_attr_keys = { **attr_keys1, **attr_keys2 }
 
-    secret_keys[uid][aid1] = dacmacs.secret_key_gen(SP, sk1, attr_keys1, [f'TOPSECRET@{aid1.upper()}'], cert)
-    secret_keys[uid][aid2] = dacmacs.secret_key_gen(SP, sk2, attr_keys2, [f'EMPLOYEE@{aid2.upper()}'], cert)
+    secret_keys[uid1][aid1] = dacmacs.secret_key_gen(SP, sk1, attr_keys1, [f'TOPSECRET@{aid1.upper()}'], cert1)
+    secret_keys[uid1][aid2] = dacmacs.secret_key_gen(SP, sk2, attr_keys2, [f'EMPLOYEE@{aid2.upper()}'], cert1)
 
     # if debug:
     #     # ======== Attribute Authority Info ======== #
@@ -481,10 +494,10 @@ def test_demo(debug=False):
 
     #     # =============== User Info ================ #
     #     print(f"\n\n{"=" * 25} Users {"=" * 25}")
-    #     for uid, user in dacmacs.users.items():
-    #         print(f"\nUser ID: {uid}")
-    #         print(f"  GPK: {user['GPK']}")
-    #         print(f"  GSK: {user['GSK']}")
+    #     for uid1, user in dacmacs.users.items():
+    #         print(f"\nUser ID: {uid1}")
+    #         print(f"  GPK1: {user['GPK1']}")
+    #         print(f"  GSK1: {user['GSK1']}")
     #         print(f"  Certificate:")
     #         for k, v in user['certificate']['message'].items():
     #             print(f"    {k}: {v}")
@@ -497,10 +510,11 @@ def test_demo(debug=False):
 
     # ============= Encrypt ============= #
     data = dacmacs.group.random(GT)
-    policy = f'TOPSECRET@{aid1.upper()} and EMPLOYEE@{aid2.upper()}'
+    policy = f'TOPSECRET@{aid1.upper()} or EMPLOYEE@{aid2.upper()}'
 
-    ciphertext = dacmacs.encrypt(SP, public_keys, public_attr_keys,
-                                 data, policy)
+    ciphertext = dacmacs.encrypt(
+        SP, public_keys, public_attr_keys, data, policy
+    )
 
     if debug:
         print(f"\n\n{"=" * 25} Encryption {"=" * 25}")
@@ -534,16 +548,19 @@ def test_demo(debug=False):
     # ====== Attribute Revocation ======= #
     #   Comment out secret_key_update to test for decryption failure
     #   Leaving it in should lead to successful decryption
-    KUK, CUK = dacmacs.update_key_gen(SP, sk1, cert, attr_keys1[f'TOPSECRET@{aid1.upper()}']['version_key'])
-    secret_keys[uid][aid1] = dacmacs.secret_key_update(
-        secret_keys[uid][aid1], KUK,
+    PK, AUK, CUK = dacmacs.update_key_gen(
+        SP, sk1, public_attr_keys[f'TOPSECRET@{aid1.upper()}']
+    )
+    public_attr_keys[f'TOPSECRET@{aid1.upper()}'] = PK
+    secret_keys[uid1][aid1] = dacmacs.secret_key_update(
+        SP, sk1, AUK, cert1, secret_keys[uid1][aid1],
         f'TOPSECRET@{aid1.upper()}'
     )
     ciphertext = dacmacs.ciphertext_update(ciphertext, CUK, f'TOPSECRET@{aid1.upper()}')
 
     # ============= Decrypt ============= #
-    token = dacmacs.token_gen(ciphertext, GPK, secret_keys[uid])
-    content_key = dacmacs.decrypt(ciphertext, token, GSK)
+    token = dacmacs.token_gen(ciphertext, GPK1, secret_keys[uid1])
+    content_key = dacmacs.decrypt(ciphertext, token, GSK1)
 
     if debug:    
         print(f"\n\n{"=" * 25} Decrpytion {"=" * 25}")

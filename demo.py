@@ -10,7 +10,7 @@ from cryptography.fernet import Fernet
 class AccessControlDemo(tk.Tk):
     def __init__(self):
         tk.Tk.__init__(self)
-        self.width = 1024
+        self.width = 1020
         self.height = 768
         self.geometry(f"{self.width}x{self.height}")
         self.title('DACMACS Demo')
@@ -36,8 +36,8 @@ class AccessControlDemo(tk.Tk):
         self.dacmacs = DACMACS()
 
         # Page Setup
-        main_frame = tk.Frame(self, width=self.width, height=self.height, background='#808080')
-        main_frame.pack()
+        main_frame = tk.Frame(self, background=COLORS['background'])
+        main_frame.pack(fill='both', expand=True)
         self.pages = {}
         for F in (CAMenu, RegisterUserForm, RegisterAAForm, LoginAAForm, LoginUserForm,
                   AAMenu, CreateAttributes, SelectUser, AssignAttributes, RevokeAttributes,
@@ -92,7 +92,9 @@ class AccessControlDemo(tk.Tk):
         def setup_auth_attrs(aid, attributes):
             full_attrs = [f'{attr.strip().upper()}@{aid.upper()}' for attr in attributes]
             self.params['authorities'][aid]['attributes'] = full_attrs
-            return self.dacmacs.attr_auth_setup(SP, aid, full_attrs)
+            sk, pk, attr_keys = self.dacmacs.attr_auth_setup(SP, aid, full_attrs)
+            self.params['authorities'][aid]['secret_key'] = sk
+            return (sk, pk, attr_keys)
 
         def assign_attrs(aid, sk, pk, attr_keys, uid, user_certificate, attrs):
             self.params['public_keys'][aid] = pk
@@ -115,6 +117,7 @@ class AccessControlDemo(tk.Tk):
             )
 
             self.params['users'][owner_uid]['files'][file_name] = {
+                "access_policy": policy,
                 "ciphertext": ciphertext,
                 "encrypted_file": encrypted_file
             }
@@ -182,14 +185,14 @@ class AccessControlDemo(tk.Tk):
             "Example text file created by Alice\n"
             "Have a wonderful day :)\n"
             "-Alice\n",
-            f'ATTRIBUTE1@{aid1.upper()} and ATTRIBUTE2@{aid1.upper()}'
+            f'ATTRIBUTE1@{aid1.upper()} or ATTRIBUTE2@{aid1.upper()} and ATTRIBUTE3@{aid2.upper()}'
         )
         create_file(
             uid2, "Example File 2",
             "Example text file created by Bob\n"
             "Have a joyous day\n"
             "-Bob\n",
-            f'ATTRIBUTE2@{aid1.upper()} or ATTRIBUTE3@{aid2.upper()}'
+            f'ATTRIBUTE2@{aid1.upper()} and ATTRIBUTE3@{aid2.upper()}'
         )
 
 
@@ -207,13 +210,14 @@ class CAMenu(tk.Frame):
         self.create_elements()
 
     def create_elements(self):
-        self.create_title()
+        TopNavBar(
+            self, self.controller,
+            title="Certificate Authority Menu",
+            quit_command=self.controller.quit
+        ).pack(fill='both', pady=(0, 15))
+
         self.create_buttons()
         self.create_infobox()
-
-    def create_title(self):
-        subtitle = TopNavBar(self, self.controller, title="Certificate Authority Menu", quit_command=self.controller.quit)
-        subtitle.pack(fill='both', pady=(0, 15))
 
     def create_buttons(self):
         btn_frame = tk.Frame(self, background=COLORS['background'])
@@ -287,7 +291,7 @@ class CAMenu(tk.Frame):
             info += f"  Password: {user['info']['password']}\n"
 
             info += f"\n  Attributes: \n"
-            try: 
+            try:
                 for aid in self.controller.params['secret_keys'][uid]:
                     auth = self.controller.params['authorities'][aid]['info']['name']
                     for attr in self.controller.params['secret_keys'][uid][aid]['AK'].keys():
@@ -315,15 +319,13 @@ class BaseForm(tk.Frame):
         self.controller = controller
         self.fields = {}
         self.submit_command = submit_command
-
-        self.navbar = TopNavBar(
-            self,
-            controller,
+        
+        TopNavBar(
+            self, controller,
             title=title,
             back_command=back_command,
             quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='both', pady=(0, 15))
+        ).pack(fill='both', pady=(0, 15))
 
         self.form_frame = tk.Frame(self, background=COLORS['background'])
         self.form_frame.pack(pady=20)
@@ -395,9 +397,7 @@ class RegisterAAForm(BaseForm):
         self.controller.params['authorities'][aid] = {
             'info': aa_info,
             'attributes': None,
-            'public_key': None,
             'secret_key': None,
-            'public_attribute_keys': None,
         }
 
         self.clear_fields()
@@ -552,14 +552,13 @@ class CreateAttributes(tk.Frame):
         self.create_elements()
 
     def create_elements(self):
-        self.navbar = TopNavBar(
+        TopNavBar(
             self,
             self.controller,
             title="Create New Attributes",
             back_command=lambda: self.controller.show_page(AAMenu, self.aid),
             quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='both', pady=(0, 15))
+        ).pack(fill='both', pady=(0, 15))
 
         self.entries_frame = tk.Frame(self, background=COLORS['background'])
         self.entries_frame.pack()
@@ -665,14 +664,13 @@ class SelectUser(tk.Frame):
         self.create_elements()
 
     def create_elements(self):
-        self.navbar = TopNavBar(
+        TopNavBar(
             self,
             self.controller,
             title="Select a User",
             back_command=lambda: self.controller.show_page(AAMenu, self.aid),
             quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='both', pady=(0, 15))
+        ).pack(fill='both', pady=(0, 15))
 
         self.user_listbox = tk.Listbox(self, width=50, height=10)
         self.user_listbox.pack(pady=20)
@@ -721,14 +719,13 @@ class AssignAttributes(tk.Frame):
         self.create_elements()
 
     def create_elements(self):
-        self.navbar = TopNavBar(
+        TopNavBar(
             self,
             self.controller,
             title="Assign Attributes",
             back_command=lambda: self.controller.show_page(SelectUser, self.aid),
             quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='both', pady=(0, 15))
+        ).pack(fill='both', pady=(0, 15))
 
         self.user_label = ColorLabel(
             self,
@@ -797,6 +794,7 @@ class AssignAttributes(tk.Frame):
 
         # Generate authority related attribute keys
         sk, pk, attr_keys = self.controller.dacmacs.attr_auth_setup(SP, self.aid, attributes)
+        self.controller.params['authorities'][self.aid]['secret_key'] = sk
         public_keys[self.aid] = pk
         public_attr_keys.update(attr_keys)
 
@@ -818,14 +816,13 @@ class RevokeAttributes(tk.Frame):
         self.create_elements()
 
     def create_elements(self):
-        self.navbar = TopNavBar(
+        TopNavBar(
             self,
             self.controller,
             title="Revoke Attributes",
             back_command=lambda: self.controller.show_page(AAMenu, self.aid),
             quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='both', pady=(0, 15))
+        ).pack(fill='both', pady=(0, 15))
 
         self.user_label = ColorLabel(
             self,
@@ -867,22 +864,45 @@ class RevokeAttributes(tk.Frame):
             self.attr_listbox.insert(tk.END, attr_name)
 
     def revoke_attribute(self):
-        attribute = self.attr_listbox.get()
-        print(f'Revoking attribute: {attribute}')
-        self.generate_update_keys()
-        self.update_user_keys()
-        self.update_ciphertext()
+        selection = self.attr_listbox.curselection()
+        revoked_attribute = f'{self.attr_listbox.get(selection[0])}@{self.aid.upper()}'
+
+        del self.controller.params['secret_keys'][self.uid][self.aid]['AK'][revoked_attribute]
+
+        # Generate update keys
+        PK, AUK, CUK = self.controller.dacmacs.update_key_gen(
+            self.controller.params['SP'], 
+            self.controller.params['authorities'][self.aid]['secret_key'],
+            self.controller.params['public_attr_keys'][revoked_attribute]
+        )
+        self.controller.params['public_attr_keys'][revoked_attribute] = PK
+
+        # Update related users' secret keys
+        secret_keys = self.controller.params['secret_keys']
+        for uid, user_keys in secret_keys.items():
+            if uid == self.uid: continue
+            if self.aid not in user_keys: continue
+
+            if revoked_attribute in user_keys[self.aid]['AK'].keys():
+                user_keys[self.aid] = self.controller.dacmacs.secret_key_update(
+                    self.controller.params['SP'], 
+                    self.controller.params['authorities'][self.aid]['secret_key'],
+                    AUK, self.controller.params['users'][uid]['certificate'],
+                    user_keys[self.aid], revoked_attribute
+                )
+
+        # Update related ciphertexts
+        for user in self.controller.params['users'].values():
+            for file_ct in user['files'].values():
+                policy_elements = file_ct['ciphertext']['policy'].split(" ")
+                attributes = [e for i, e in enumerate(policy_elements) if i % 2 == 0]
+                if revoked_attribute in attributes:
+                    file_ct['ciphertext'] = self.controller.dacmacs.ciphertext_update(
+                        file_ct['ciphertext'], CUK, 
+                        revoked_attribute
+                    )
 
         self.controller.show_page(AAMenu, self.aid)
-
-    def generate_update_keys(self):
-        pass
-
-    def update_user_keys(self):
-        pass
-
-    def update_ciphertext(self):
-        pass
 
 
 # ========== User Menus ========== #
@@ -896,11 +916,6 @@ class UserMenu(tk.Frame):
         self.create_elements()
 
     def create_elements(self):
-        self.create_navbar()
-        self.create_buttons()
-        self.create_infobox()
-
-    def create_navbar(self):
         self.navbar = TopNavBar(
             self,
             self.controller,
@@ -909,6 +924,9 @@ class UserMenu(tk.Frame):
             quit_command=lambda: self.controller.quit()
         )
         self.navbar.pack(fill='both', pady=(0, 15))
+
+        self.create_buttons()
+        self.create_infobox()
 
     def create_buttons(self):
         btn_frame = tk.Frame(self, background=COLORS['background'])
@@ -987,14 +1005,13 @@ class CreateFile(tk.Frame):
         self.create_elements()
 
     def create_elements(self):
-        self.navbar = TopNavBar(
+        TopNavBar(
             self,
             self.controller,
             title="Encrypt Text File",
             back_command=lambda: self.controller.show_page(UserMenu, self.uid),
             quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='both', pady=(0, 15))
+        ).pack(fill='both', pady=(0, 15))
 
         self.text_name = ColorEntry(self)
         self.text_name.pack()
@@ -1072,20 +1089,17 @@ class CreateAccessPolicy(tk.Frame):
         self.create_elements()
 
     def create_elements(self):
-        self.create_navbar()
-        self.create_attribute_widgets()
-        self.create_control_buttons()
-        self.create_policy_widget()
-
-    def create_navbar(self):
-        self.navbar = TopNavBar(
+        TopNavBar(
             self,
             self.controller,
             title="Build Access Policy",
             back_command=lambda: self.controller.show_page(CreateFile, self.uid, self.file),
             quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='x', pady=(0, 20))
+        ).pack(fill='x', pady=(0, 20))
+
+        self.create_attribute_widgets()
+        self.create_control_buttons()
+        self.create_policy_widget()
 
     def create_attribute_widgets(self):
         attr_frame = tk.LabelFrame(
@@ -1097,7 +1111,6 @@ class CreateAccessPolicy(tk.Frame):
         )
         attr_frame.pack(side="left", fill="y", padx=10, pady=(0, 10))
 
-        # Authority selection dropdown
         self.authority_var = tk.StringVar()
         self.authority_dropdown = ttk.Combobox(
             attr_frame,
@@ -1108,7 +1121,6 @@ class CreateAccessPolicy(tk.Frame):
         self.authority_dropdown.pack(pady=5)
         self.authority_dropdown.bind("<<ComboboxSelected>>", self.load_attributes)
 
-        # Listbox for attributes
         self.attr_listbox = tk.Listbox(attr_frame, selectmode="single", width=25, height=15)
         self.attr_listbox.pack(pady=5)
 
@@ -1158,7 +1170,6 @@ class CreateAccessPolicy(tk.Frame):
         ).pack(side="left", padx=5)
 
     def create_policy_widget(self):
-        # ====== Policy Interface ====== #
         policy_frame = tk.LabelFrame(
             self,
             text="Policy Preview",
@@ -1168,7 +1179,6 @@ class CreateAccessPolicy(tk.Frame):
         )
         policy_frame.pack(side="right", fill="both", expand=True, padx=10, pady=(0, 10))
 
-        # Scrollable canvas
         self.canvas = tk.Canvas(policy_frame, bg=COLORS['background'], highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
 
@@ -1263,14 +1273,13 @@ class ViewFile(tk.Frame):
         self.create_elements()
 
     def create_elements(self):
-        self.navbar = TopNavBar(
+        TopNavBar(
             self,
             self.controller,
             title="Search & Decrypt File",
             back_command=lambda: self.controller.show_page(UserMenu, self.uid),
             quit_command=lambda: self.controller.quit()
-        )
-        self.navbar.pack(fill='x', pady=(0, 20))
+        ).pack(fill='x', pady=(0, 20))
 
         self.form_frame = tk.Frame(self, background=COLORS['background'])
         self.form_frame.pack(pady=10, fill="x")
@@ -1326,7 +1335,7 @@ class ViewFile(tk.Frame):
         self.file_listbox.delete(0, tk.END)
         self.result_label.configure(text="Decrypted File: ")
         self.result_text.delete("1.0", tk.END)
-    
+
         # Populate user list
         users = self.controller.params.get('users', {})
         if users:
@@ -1344,11 +1353,12 @@ class ViewFile(tk.Frame):
         self.selected_user.set(name)
 
     def populate_files(self, *args):
-        # Populate the listbox with files created by the selected user
-        self.file_listbox.delete(0, tk.END)
-        files = self.controller.params['users'][self.selected_uid].get('files', {})
-        for fname in files.keys():
-            self.file_listbox.insert(tk.END, fname)
+        if self.selected_uid:
+            # Populate the listbox with files created by the selected user
+            self.file_listbox.delete(0, tk.END)
+            files = self.controller.params['users'][self.selected_uid].get('files', {})
+            for fname in files.keys():
+                self.file_listbox.insert(tk.END, fname)
 
     def decrypt_selected_file(self):
         selection = self.file_listbox.curselection()
@@ -1356,7 +1366,7 @@ class ViewFile(tk.Frame):
             self.result_text.delete("1.0", tk.END)
             self.result_text.insert(tk.END, "No user or file selected.")
             return
-        
+
         file_name = self.file_listbox.get(selection[0])
         try:
             file_ct = self.controller.params['users'][self.selected_uid]['files'][file_name]
@@ -1376,7 +1386,7 @@ class ViewFile(tk.Frame):
             file_bytes = fernet_key.decrypt(file_ct["encrypted_file"])
             decrypted_file = pickle.loads(file_bytes)
             fname, fcontent = decrypted_file
-            
+
             # Display file
             self.result_label.configure(text=f'Decrypted File: {fname}')
             self.result_text.delete("1.0", tk.END)
@@ -1385,7 +1395,8 @@ class ViewFile(tk.Frame):
         except Exception as e:
             self.result_label.configure(text=f'Decrypted File: ')
             self.result_text.delete("1.0", tk.END)
-            self.result_text.insert(tk.END, f'ERROR: {e}')
+            self.result_text.insert(tk.END, f'ERROR - Could not decrypt file.')
+            print(f'Exception: {e}')
 
 
 # =========== Widgets ============ #
